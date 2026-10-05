@@ -57,7 +57,7 @@ final class LocaleSelectorTests: XCTestCase {
         XCTAssertEqual(selection, LocaleSelection(kind: .user, locales: ["ar-EG", "ar"]))
     }
 
-    /// A user whose second device language is in the release still gets the app's language (D-1).
+    /// A user whose second device language is in the release still gets the app's language.
     func testAnotherDeviceLanguageIsNotServed() {
         let selection = LocaleSelector.select(available: ["ar", "fr"], preferences: ["fr-FR", "de-DE"], appLanguage: "de",
                                               override: nil, fallbackLanguage: "ar")
