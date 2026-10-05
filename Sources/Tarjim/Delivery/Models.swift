@@ -47,10 +47,10 @@ struct Manifest: Decodable, Sendable, Equatable {
 
     /// A file type this SDK does not know may carry another entry shape; it is dropped so the
     /// rest of the release still installs.
-    private struct LenientEntry: Decodable {
-        let entry: SliceEntry?
+    private struct Lenient<Value: Decodable>: Decodable {
+        let value: Value?
         init(from decoder: Decoder) throws {
-            entry = try? SliceEntry(from: decoder)
+            value = try? Value(from: decoder)
         }
     }
 
@@ -58,9 +58,11 @@ struct Manifest: Decodable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
         baseLocale = try c.decodeIfPresent(String.self, forKey: .baseLocale)
-        bundles = try c.decode([String: BundleEntry].self, forKey: .bundles)
-        let raw = try c.decode([String: [String: [String: LenientEntry]]].self, forKey: .slices)
-        slices = raw.mapValues { $0.mapValues { $0.compactMapValues(\.entry) } }
+        let kept = try c.decode([String: Lenient<BundleEntry>].self, forKey: .bundles).compactMapValues(\.value)
+        bundles = kept
+        let raw = try c.decode([String: [String: [String: Lenient<SliceEntry>]]].self, forKey: .slices)
+        // A bundle that cannot be addressed takes its slices with it.
+        slices = raw.filter { kept[$0.key] != nil }.mapValues { $0.mapValues { $0.compactMapValues(\.value) } }
     }
 }
 
