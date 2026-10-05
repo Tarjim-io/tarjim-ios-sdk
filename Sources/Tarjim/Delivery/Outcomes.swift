@@ -18,8 +18,6 @@ enum MetaOutcome: Sendable, Equatable {
     case serverError(retryAfter: Int?)
     /// The transport threw.
     case networkFailure
-    /// Placeholder until the behaviour exists.
-    case unexpected(status: Int)
 }
 
 enum ManifestOutcome: Sendable, Equatable {
