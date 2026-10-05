@@ -14,10 +14,9 @@ enum MainBundleProxy {
     /// What the resolver decided for a lookup.
     enum Answer {
         case downloaded(DownloadedText)
-        /// The app's own text, already read: asking the original again would reach it a second time.
-        case app(String)
-        /// The app has no text and neither has the download; Apple's `value`-or-key answer applies.
-        case missed
+        /// A fallback selection: the app's own text comes first, so the caller asks the original lookup (once) and
+        /// uses this download, if any, only when the app has nothing.
+        case appFirst(DownloadedText?)
     }
 
     /// The answer for a key in a table, or nil to let the bundle answer as it would have.
@@ -118,8 +117,10 @@ enum MainBundleProxy {
             guard let state = state(of: bundle) else { return ((value as String?) ?? (key as String)) as NSString }
             switch state.downloaded(key as String, table as String?) {
             case .downloaded(let hit): return hit.value as NSString
-            case .app(let text): return text as NSString
-            case .missed: return applesFallback(key, value) as NSString
+            case .appFirst(let fallback):
+                let own = callOriginal(state, bundle, key as String, Resolver.sentinel, table as String?)
+                if own != Resolver.sentinel { return own as NSString }
+                return (fallback?.value ?? applesFallback(key, value)) as NSString
             case nil: break
             }
             return callOriginal(state, bundle, key as String, value as String?, table as String?) as NSString
@@ -130,26 +131,29 @@ enum MainBundleProxy {
             let attributed: @convention(block) (AnyObject, NSString, NSString?, NSString?) -> NSAttributedString = {
                 bundle, key, value, table in
                 guard let state = state(of: bundle) else { return NSAttributedString(string: (value as String?) ?? (key as String)) }
-                switch state.downloaded(key as String, table as String?) {
-                case .downloaded(let hit):
-                    // Apple's own lookup on the locale folder keeps plural rules, language and markdown.
-                    if let imp = class_getMethodImplementation(object_getClass(hit.source), attributedSelector) {
-                        let call = unsafeBitCast(imp, to: AttributedLookup.self)
-                        return call(hit.source, attributedSelector, key, nil, nil)
-                    }
-                    return NSAttributedString(string: hit.value)
-                case .missed: return NSAttributedString(string: applesFallback(key, value))
-                case .app, nil: break
-                }
+                let answer = state.downloaded(key as String, table as String?)
+                if case .downloaded(let hit) = answer { return attributedAnswer(hit, key) }
                 guard let imp = class_getMethodImplementation(state.base, attributedSelector) else {
                     return NSAttributedString(string: (value as String?) ?? (key as String))
                 }
-                return unsafeBitCast(imp, to: AttributedLookup.self)(bundle, attributedSelector, key, value, table)
+                let call = unsafeBitCast(imp, to: AttributedLookup.self)
+                guard case .appFirst(let fallback) = answer else { return call(bundle, attributedSelector, key, value, table) }
+                let own = call(bundle, attributedSelector, key, Resolver.sentinel as NSString, table)
+                if own.string != Resolver.sentinel { return own }
+                return fallback.map { attributedAnswer($0, key) } ?? NSAttributedString(string: applesFallback(key, value))
             }
             class_addMethod(subclass, attributedSelector, imp_implementationWithBlock(attributed), "@@:@@@")
         }
         objc_registerClassPair(subclass)
         return subclass
+    }
+
+    // Apple's own lookup on the locale folder keeps plural rules, language and markdown.
+    private static func attributedAnswer(_ hit: DownloadedText, _ key: NSString) -> NSAttributedString {
+        guard let imp = class_getMethodImplementation(object_getClass(hit.source), attributedSelector) else {
+            return NSAttributedString(string: hit.value)
+        }
+        return unsafeBitCast(imp, to: AttributedLookup.self)(hit.source, attributedSelector, key, nil, nil)
     }
 }
 
@@ -159,13 +163,6 @@ extension Resolver {
     func downloaded(_ key: String, table: String?) -> MainBundleProxy.Answer? {
         let snapshot = snapshot()
         guard let selection = snapshot.selection else { return nil }
-        // As in `string`: for a fallback selection the app's own text comes before the download.
-        var appMissed = false
-        if selection.kind == .fallback {
-            let own = MainBundleProxy.original(app.bundle, key: key, value: Self.sentinel, table: table)
-            if own != Self.sentinel { return .app(own) }
-            appMissed = true
-        }
         let bundle: TarjimBundle
         if let table, table != "Localizable" {
             bundle = BundleDirectory.id(for: .namespace(table), in: snapshot.entries) != nil ? .namespace(table) : .custom(table)
@@ -175,7 +172,7 @@ extension Resolver {
         let hit = BundleDirectory.id(for: bundle, in: snapshot.entries).flatMap {
             ota(raw: key, snapshot: snapshot, id: $0, locales: selection.locales)
         }
-        if let hit { return .downloaded(hit) }
-        return appMissed ? .missed : nil
+        if selection.kind == .fallback { return .appFirst(hit) }
+        return hit.map { .downloaded($0) }
     }
 }
