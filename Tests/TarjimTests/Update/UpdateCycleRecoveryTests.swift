@@ -323,7 +323,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         let release = try Release.one()
         device.server.publish(release)
         let gone = try DeliveryFixtures.error("object-404-slice-not-found")
-        device.server.answerObject(hash: try release.hash(of: en), fileType: "strings", gone, gone)
+        device.server.answerObject(hash: try release.hash(of: en), fileType: "strings", gone)
         try await device.runAndActivate()
         device.server.answerMeta(FakeTransport.Answer(status: 304))
         device.clock.advance(1800)

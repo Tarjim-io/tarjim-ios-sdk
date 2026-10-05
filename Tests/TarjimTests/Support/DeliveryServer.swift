@@ -7,6 +7,7 @@ import XCTest
 final class DeliveryServer: Transport, @unchecked Sendable {
     private let lock = NSLock()
     private var metaAnswers: [FakeTransport.Answer] = []
+    private var publishedMeta: FakeTransport.Answer?
     private var manifests: [String: Data] = [:]        // checksum → bytes
     private var objects: [String: Data] = [:]          // "<hash>.<type>" → bytes
     private var objectOverrides: [String: [FakeTransport.Answer]] = [:]
@@ -30,7 +31,10 @@ final class DeliveryServer: Transport, @unchecked Sendable {
         lock.withLock {
             manifests[release.checksum] = release.manifest
             objects.merge(release.objects) { _, new in new }
-            if meta { metaAnswers = [.json(200, release.metaBody, headers: ["ETag": "\"m\(release.releaseId)-\(release.checksum.prefix(8))\""])] }
+            if meta {
+                publishedMeta = release.metaAnswer()
+                metaAnswers = [release.metaAnswer()]
+            }
         }
     }
 
@@ -66,6 +70,10 @@ final class DeliveryServer: Transport, @unchecked Sendable {
             if url.path.hasSuffix("/delivery/meta") {
                 guard let first = metaAnswers.first else { return FakeTransport.Answer(status: 503) }
                 if metaAnswers.count > 1 { metaAnswers.removeFirst() }
+                // A real server answers 304 only to a conditional request.
+                if first.status == 304, request.value(forHTTPHeaderField: "If-None-Match") == nil, let publishedMeta {
+                    return publishedMeta
+                }
                 return first
             }
             if url.lastPathComponent == "manifest.json" {
