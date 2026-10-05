@@ -37,7 +37,7 @@ struct DeliveryClient: Sendable {
             return .notModified
         case 429:
             return .throttled(retryAfter: retryAfter)
-        case 301, 302, 303, 307, 308:
+        case 301, 302, 307, 308:
             // Never followed, and retrying will not help: the endpoint has moved.
             return .configurationError(code: "redirect", pollAfter: nil)
         case 400, 401, 403, 404:
