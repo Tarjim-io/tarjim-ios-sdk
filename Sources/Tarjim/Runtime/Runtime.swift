@@ -28,6 +28,9 @@ final class Runtime: Sendable {
         private var startFinished = false
         private var startWaiters: [CheckedContinuation<Void, Never>] = []
 
+        /// The timers run exactly while the app is active.
+        var isActive: Bool { lock.withLock { probationTask != nil } }
+
         func finishStart() {
             let waiters = lock.withLock {
                 startFinished = true
@@ -120,6 +123,7 @@ final class Runtime: Sendable {
     private let reporter: Reporter
     private let resolver: Resolver
     private let parts = Parts()
+    private let lifecycle = LifecycleQueue()
 
     init(configuration: TarjimConfiguration, environment: Environment) throws {
         self.configuration = configuration
@@ -132,9 +136,21 @@ final class Runtime: Sendable {
         reporter = Reporter(store: store, handler: configuration.onReport)
         // Lookups mean the same before and after `start`: the snapshot is empty until the engine has built one.
         let snapshots = self.snapshots
+        let queue = lifecycle
         resolver = Resolver(app: AppResources(bundle: environment.appBundle, language: environment.appLanguage()),
                             defaultBundle: configuration.defaultBundle, snapshot: { snapshots.current })
+        // Weak, so a runtime nobody holds can end; its deinit finishes the stream.
+        Task { [weak self] in
+            for await _ in queue.wakeups {
+                // Changes that arrived together net out: a resign straight followed by a become leaves the app active.
+                guard let self, let latest = queue.takeLatest() else { continue }
+                guard latest != parts.isActive else { continue }
+                if latest { await becameActive() } else { await resignedActive() }
+            }
+        }
     }
+
+    deinit { lifecycle.finish() }
 
     /// Launches the engine, cleans up, and reports a revert. Once per instance.
     func start(foreground: Bool) async {
@@ -145,19 +161,19 @@ final class Runtime: Sendable {
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
                                       installIdentifier: identifier)
         let client = DeliveryClient(endpoint: endpoint, identity: identity, transport: environment.transport)
+        let parts = self.parts
         let engine = Engine(EngineEnvironment(
             store: store, client: client, snapshots: snapshots, preferences: environment.preferences,
             appLanguage: environment.appLanguage, fallbackLanguage: configuration.fallbackLanguage,
-            now: environment.now, random: environment.random))
+            now: environment.now, random: environment.random,
+            // An install shown mid-session is proven by the foreground time after it, not before.
+            activated: { [self] in parts.restartProbation(makeProbationTask) }))
         parts.engine = engine
         // The stream is opened before the launch so no event is missed.
         let events = engine.updates()
-        let parts = self.parts
-        Task.detached { [self] in
+        Task.detached {
             for await update in events {
                 parts.broadcast(update)
-                // An install shown mid-session is proven by the foreground time after it, not before.
-                if update == .activated { parts.restartProbation(makeProbationTask) }
             }
         }
         await engine.launch(foreground: foreground)
@@ -234,9 +250,9 @@ final class Runtime: Sendable {
 
     /// For the system's notifications, which arrive in order but would run as unordered tasks: queues the change and
     /// returns at once; queued changes are applied one at a time, in the order they were noted.
-    func noteBecameActive() {}
+    func noteBecameActive() { lifecycle.note(true) }
 
-    func noteResignedActive() {}
+    func noteResignedActive() { lifecycle.note(false) }
 
     /// The app is no longer active: nothing runs until it is again.
     func resignedActive() async {
@@ -270,4 +286,36 @@ final class Runtime: Sendable {
         if let first = bundle.preferredLocalizations.first, first != "Base" { return first }
         return bundle.infoDictionary?["CFBundleDevelopmentRegion"] as? String ?? "en"
     }
+}
+
+/// The key stays out of anything that prints or dumps a runtime.
+extension Runtime: CustomReflectable {
+    var customMirror: Mirror { Mirror(self, children: []) }
+}
+
+/// Lifecycle changes noted in order from any thread; the runtime applies them from one task.
+private final class LifecycleQueue: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [Bool] = []
+    private let signal: AsyncStream<Void>.Continuation
+    let wakeups: AsyncStream<Void>
+
+    init() {
+        (wakeups, signal) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    }
+
+    func note(_ active: Bool) {
+        lock.withLock { pending.append(active) }
+        signal.yield()
+    }
+
+    /// The last change noted since the previous call.
+    func takeLatest() -> Bool? {
+        lock.withLock {
+            defer { pending = [] }
+            return pending.last
+        }
+    }
+
+    func finish() { signal.finish() }
 }
