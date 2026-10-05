@@ -173,6 +173,19 @@ extension Resolver {
             ota(raw: key, snapshot: snapshot, id: $0, locales: selection.locales)
         }
         if selection.kind == .fallback { return .appFirst(hit) }
-        return hit.map { .downloaded($0) }
+        if let hit { return .downloaded(hit) }
+        // As `string`: the app's own folder for each selected locale. The folder the main bundle itself resolves to
+        // is answered by the original lookup, which the caller makes once, so what follows it waits for that miss.
+        let resolved = app.lproj(matching: app.language)
+        var later = false
+        for locale in selection.locales {
+            guard let lproj = app.lproj(matching: locale) else { continue }
+            if lproj === resolved { later = true; continue }
+            let value = found(lproj, key, table: table)
+            guard let value else { continue }
+            let text = MainBundleProxy.DownloadedText(value: value, source: lproj)
+            return later ? .appFirst(text) : .downloaded(text)
+        }
+        return nil
     }
 }

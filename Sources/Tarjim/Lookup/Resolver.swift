@@ -206,6 +206,7 @@ struct Resolver: Sendable {
             // With the proxy on, the app bundle answers for the folder it resolves to, through its original lookup:
             // the same text, and the app's own lookup (and any earlier patch of it) is reached on every miss.
             if MainBundleProxy.isInstalled(on: app.bundle), let resolved, app.lproj(matching: locale) === resolved {
+                if askedApp { continue }
                 askedApp = true
                 if let value = appAsResolved(key, arguments, table) { return value }
                 continue
@@ -237,7 +238,7 @@ struct Resolver: Sendable {
         return nil
     }
 
-    private func found(_ bundle: Bundle, _ key: String, table: String?) -> String? {
+    func found(_ bundle: Bundle, _ key: String, table: String?) -> String? {
         let value = bundle.localizedString(forKey: key, value: Self.sentinel, table: table)
         return value == Self.sentinel ? nil : value
     }
