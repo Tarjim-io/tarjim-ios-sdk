@@ -26,7 +26,8 @@ final class StoreCleanupTests: XCTestCase {
         try await store.activate(a)
         try await store.activate(b)
         try await store.setPending(c)
-        let removed = try await store.cleanup()
+        // A build nothing recorded is a crash's leftover only from the NEXT launch's point of view.
+        let removed = try await StoreFixtures.store(root).cleanup()
         XCTAssertTrue(removed.contains(relative(store, "installs/\(crashed.directory)")), "\(removed)")
         XCTAssertFalse(StoreFixtures.exists(store.url(of: crashed)))
         for kept in [a, b, c] {
