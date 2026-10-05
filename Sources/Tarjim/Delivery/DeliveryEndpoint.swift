@@ -18,7 +18,7 @@ struct DeliveryEndpoint: Sendable, Equatable {
               let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let name = parts.host, !name.isEmpty,
               // Plain http would put the key on the wire in the clear.
-              scheme == "https" || ["localhost", "127.0.0.1", "::1"].contains(name.lowercased()),
+              scheme == "https" || ["localhost", "127.0.0.1", "::1"].contains(name.lowercased().trimmingCharacters(in: ["[", "]"])),
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
               parts.path.isEmpty || parts.path == "/"
         else { throw Error.invalidHost }
