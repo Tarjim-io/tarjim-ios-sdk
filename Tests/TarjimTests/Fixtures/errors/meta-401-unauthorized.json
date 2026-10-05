@@ -2,7 +2,8 @@
   "provenance": "hand-built",
   "status": 401,
   "headers": {
-    "Content-Type": "application/problem+json; charset=utf-8"
+    "Content-Type": "application/problem+json; charset=utf-8",
+    "X-Tarjim-Api-Version": "2026-07-29"
   },
   "body": "{\"type\":\"https://api.tarjim.io/problems/unauthorized\",\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"Missing or invalid API key.\",\"code\":\"unauthorized\"}"
 }

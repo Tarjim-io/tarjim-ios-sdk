@@ -3,7 +3,8 @@
   "status": 503,
   "headers": {
     "Content-Type": "application/problem+json; charset=utf-8",
-    "Retry-After": "30"
+    "Retry-After": "30",
+    "X-Tarjim-Api-Version": "2026-07-29"
   },
   "body": "{\"type\":\"https://api.tarjim.io/problems/delivery.manifest_unavailable\",\"title\":\"Service Unavailable\",\"status\":503,\"detail\":\"The manifest is not available yet.\",\"code\":\"delivery.manifest_unavailable\"}"
 }

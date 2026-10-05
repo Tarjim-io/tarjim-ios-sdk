@@ -1,0 +1,9 @@
+{
+  "provenance": "hand-built",
+  "status": 500,
+  "headers": {
+    "Content-Type": "application/problem+json; charset=utf-8",
+    "X-Tarjim-Api-Version": "2026-07-29"
+  },
+  "body": "{\"type\":\"https://api.tarjim.io/problems/delivery.cdn_signing_failed\",\"title\":\"Internal Server Error\",\"status\":500,\"detail\":\"The delivery URLs could not be signed.\",\"code\":\"delivery.cdn_signing_failed\"}"
+}

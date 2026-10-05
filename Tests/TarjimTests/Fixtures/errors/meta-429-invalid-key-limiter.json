@@ -1,9 +1,9 @@
 {
   "provenance": "hand-built",
+  "note": "The invalid-key limiter sends no Retry-After.",
   "status": 429,
   "headers": {
     "Content-Type": "application/problem+json; charset=utf-8",
-    "Retry-After": "60",
     "X-Tarjim-Api-Version": "2026-07-29"
   },
   "body": "{\"type\":\"https://api.tarjim.io/problems/too-many-requests\",\"title\":\"Too Many Requests\",\"status\":429,\"detail\":\"Too many requests.\",\"code\":\"too-many-requests\"}"
