@@ -11,7 +11,10 @@
 Exit codes: 0 pass, 1 gate failure, 2 usage error.
 
 The declared list is derived from a report, never written by hand, so it cannot under-declare;
-re-asserting it at every later run is what turns a deleted or skipped test into a failure.
+re-asserting it at every later run is what turns a deleted test into a failure. SwiftPM's report
+records a skipped XCTest as passed, so a skip is refused at the source instead: any `XCTSkip` under
+--tests fails the gate. A RED failure's REASON is not checked (SwiftPM writes only "failure"): read
+the failure messages before minting.
 """
 
 import argparse
@@ -28,12 +31,18 @@ def fail(message, code=1):
 
 
 def read_report(path):
-    try:
-        root = ET.parse(path).getroot()
-    except (OSError, ET.ParseError) as error:
-        fail(f"cannot read report {path}: {error}")
+    roots = []
+    # `swift test` writes Swift Testing results to a sibling file; a failure there must count too.
+    stem, extension = os.path.splitext(path)
+    for candidate in (path, f"{stem}-swift-testing{extension}"):
+        if candidate != path and not os.path.exists(candidate):
+            continue
+        try:
+            roots.append(ET.parse(candidate).getroot())
+        except (OSError, ET.ParseError) as error:
+            fail(f"cannot read report {candidate}: {error}")
     results = {}
-    for case in root.iter("testcase"):
+    for case in (case for root in roots for case in root.iter("testcase")):
         key = (case.get("classname", ""), case.get("name", ""))
         if key in results:
             fail(f"duplicate test in report: {key[0]}.{key[1]}")
@@ -66,7 +75,19 @@ def main():
     parser.add_argument("--declared")
     parser.add_argument("--expect", choices=["failing", "passing"])
     parser.add_argument("--since")
+    parser.add_argument("--tests", default="Tests", help="test sources that must not skip (default: Tests)")
     args = parser.parse_args()
+
+    if not os.path.isdir(args.tests):
+        fail(f"--tests {args.tests} is not a directory", 2)
+    skips = []
+    for directory, _, files in os.walk(args.tests):
+        for name in files:
+            if name.endswith(".swift"):
+                with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                    skips += [f"{os.path.join(directory, name)}:{n}" for n, line in enumerate(handle, 1) if "XCTSkip" in line]
+    if skips:
+        fail("a skipped test would count as passed; remove XCTSkip: " + ", ".join(skips))
 
     results = read_report(args.report)
 
@@ -84,21 +105,19 @@ def main():
         print(f"[OK] declared {len(declared)} failing tests of {len(results)} in the report -> {args.emit_declared}")
         return
 
-    if not (args.declared and args.expect):
-        fail("give --emit-declared, or --declared with --expect", 2)
+    if not (args.declared and args.expect and args.since):
+        fail("give --emit-declared, or --declared with --expect and --since", 2)
 
     with open(args.declared, encoding="utf-8") as handle:
         declared = [(entry["suite"], entry["name"]) for entry in json.load(handle)]
     if not declared:
         fail("the declared list is empty")
 
-    freshness = "NOT CHECKED"
-    if args.since:
-        since = parse_since(args.since)
-        modified = datetime.datetime.fromtimestamp(os.path.getmtime(args.report), datetime.timezone.utc)
-        if modified < since:
-            fail(f"report written {modified.isoformat()} is older than --since {since.isoformat()}")
-        freshness = f"written {modified.isoformat()} >= {since.isoformat()}"
+    since = parse_since(args.since)
+    modified = datetime.datetime.fromtimestamp(os.path.getmtime(args.report), datetime.timezone.utc)
+    if modified < since:
+        fail(f"report written {modified.isoformat()} is older than --since {since.isoformat()}")
+    freshness = f"written {modified.isoformat()} >= {since.isoformat()}"
 
     wanted = "failed" if args.expect == "failing" else "passed"
     problems = []
