@@ -232,6 +232,12 @@ final class Runtime: Sendable {
         }
     }
 
+    /// For the system's notifications, which arrive in order but would run as unordered tasks: queues the change and
+    /// returns at once; queued changes are applied one at a time, in the order they were noted.
+    func noteBecameActive() {}
+
+    func noteResignedActive() {}
+
     /// The app is no longer active: nothing runs until it is again.
     func resignedActive() async {
         parts.stopTasks(at: environment.now())
