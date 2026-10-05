@@ -546,4 +546,16 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         }
         XCTAssertNotNil(try device.file(pending, ar))
     }
+
+    /// A locale key the Store will not write as a folder name is never "missing" either.
+    func testAnUnsafeLocaleKeyIsNotMissingForever() async throws {
+        let device = try Device(self, locales: ["en", "en.x"])
+        let odd = Slot(bundleId: "ns7", locale: "en.x", fileType: "strings")
+        let release = try Release.one().changing(releaseId: 43, slots: [odd: Data("\"x\" = \"y\";".utf8)])
+        device.server.publish(release)
+        try await device.runAndActivate()
+        device.clock.advance(1800)
+        let report = try await device.cycle().run()
+        XCTAssertEqual(report.outcome, .unchanged)
+    }
 }
