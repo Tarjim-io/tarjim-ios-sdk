@@ -36,7 +36,7 @@ final class ResolverChainTests: XCTestCase {
         XCTAssertEqual(resolver.string("eg.count", arguments: [3]), "\(LookupFixtures.digits(3, "ar-EG")) متبقية", "found in ar-EG: ar-EG's digits")
     }
 
-    /// D-27: for a user the release has no language for, the app's own text (as Apple resolves it) comes before the
+    /// For a user the release has no language for, the app's own text (as Apple resolves it) comes before the
     /// fallback language's downloads — and the app's folder for the FALLBACK language is not a step at all.
     func testTheFallbackOrderIsAppThenDownloadThenKey() throws {
         let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self, language: "en"), install: try LookupFixtures.install(for: self),
