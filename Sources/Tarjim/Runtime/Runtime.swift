@@ -22,7 +22,9 @@ final class Runtime: Sendable {
         private let lock = NSLock()
         private var startedFlag = false
         private var engineValue: Engine?
-        private var resolverValue: Resolver?
+        private var scheduleTask: Task<Void, Never>?
+        private var probationTask: Task<Void, Never>?
+        private var resignedAt: Date?
 
         /// True the first time only.
         func markStarted() -> Bool {
@@ -54,9 +56,29 @@ final class Runtime: Sendable {
             set { lock.withLock { engineValue = newValue } }
         }
 
-        var resolver: Resolver? {
-            get { lock.withLock { resolverValue } }
-            set { lock.withLock { resolverValue = newValue } }
+        /// Starts each task unless one runs.
+        func startTasks(probation: () -> Task<Void, Never>, schedule: () -> Task<Void, Never>) {
+            lock.withLock {
+                if probationTask == nil { probationTask = probation() }
+                if scheduleTask == nil { scheduleTask = schedule() }
+            }
+        }
+
+        /// Cancels both tasks and records when the app resigned.
+        func stopTasks(at now: Date) {
+            let tasks: [Task<Void, Never>] = lock.withLock {
+                defer { scheduleTask = nil; probationTask = nil; resignedAt = now }
+                return [scheduleTask, probationTask].compactMap { $0 }
+            }
+            for task in tasks { task.cancel() }
+        }
+
+        /// Seconds since the app resigned, 0 when it never did; consumed.
+        func timeAway(now: Date) -> TimeInterval {
+            lock.withLock {
+                defer { resignedAt = nil }
+                return resignedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0
+            }
         }
     }
 
@@ -66,6 +88,7 @@ final class Runtime: Sendable {
     private let store: Store
     private let snapshots = SnapshotHolder()
     private let reporter: Reporter
+    private let resolver: Resolver
     private let parts = Parts()
 
     init(configuration: TarjimConfiguration, environment: Environment) throws {
@@ -77,9 +100,13 @@ final class Runtime: Sendable {
             identifier: StoreIdentifier.make(host: configuration.host, projectId: configuration.projectId, apiKey: configuration.apiKey),
             sdkVersion: environment.sdkVersion)
         reporter = Reporter(store: store, handler: configuration.onReport)
+        // Lookups mean the same before and after `start`: the snapshot is empty until the engine has built one.
+        let snapshots = self.snapshots
+        resolver = Resolver(app: AppResources(bundle: environment.appBundle, language: environment.appLanguage()),
+                            defaultBundle: configuration.defaultBundle, snapshot: { snapshots.current })
     }
 
-    /// Launches the engine, opens the lookups, cleans up, and reports a revert. Once per instance.
+    /// Launches the engine, cleans up, and reports a revert. Once per instance.
     func start(foreground: Bool) async {
         guard parts.markStarted() else { return }
         let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
@@ -99,13 +126,6 @@ final class Runtime: Sendable {
         await engine.launch(foreground: foreground)
         await reportRevert(of: engine)
 
-        let bundle = environment.appBundle, language = environment.appLanguage()
-        let snapshots = self.snapshots, defaultBundle = configuration.defaultBundle
-        // Listing the app's localizations touches the file system.
-        parts.resolver = await Task.detached {
-            Resolver(app: AppResources(bundle: bundle, language: language), defaultBundle: defaultBundle,
-                     snapshot: { snapshots.current })
-        }.value
         _ = try? await store.cleanup()
     }
 
@@ -124,14 +144,11 @@ final class Runtime: Sendable {
     }
 
     func string(_ key: String, bundle: TarjimBundle?) -> String {
-        if let resolver = parts.resolver { return resolver.string(key, bundle: bundle) }
-        return environment.appBundle.localizedString(forKey: key, value: key, table: nil)
+        resolver.string(key, bundle: bundle)
     }
 
     func string(_ key: String, arguments: [CVarArg], bundle: TarjimBundle?) -> String {
-        if let resolver = parts.resolver { return resolver.string(key, arguments: arguments, bundle: bundle) }
-        let format = environment.appBundle.localizedString(forKey: key, value: key, table: nil)
-        return String(format: format, locale: Locale(identifier: environment.appLanguage()), arguments: arguments)
+        resolver.string(key, arguments: arguments, bundle: bundle)
     }
 
     var locale: Locale {
@@ -142,6 +159,7 @@ final class Runtime: Sendable {
     /// One check now, with its report passed to the reporter.
     @discardableResult
     func checkNow() async -> CycleReport {
+        // Before `start` has built the engine there is nothing to check; try again in an hour.
         guard let engine = parts.engine else { return CycleReport(outcome: .failed, nextCheckIn: 3600) }
         let report = await engine.check()
         await reporter.cycleFinished(report)
@@ -162,7 +180,26 @@ final class Runtime: Sendable {
         return stream
     }
 
-    /// The app became active: a process the system launched in the background counts as launched now.
+    /// The app became active: a process the system launched in the background counts as launched now, and the
+    /// probation timer and the update schedule run until `resignedActive()`.
+    func becameActive() async {
+        parts.startTasks(
+            probation: {
+                Task { [self] in
+                    await environment.sleep(Engine.probationSeconds)
+                    guard !Task.isCancelled else { return }
+                    await parts.engine?.foregroundElapsed(Engine.probationSeconds)
+                }
+            },
+            schedule: { Task { [self] in await runSchedule(iterations: nil) } })
+        await didBecomeActive(afterBackground: parts.timeAway(now: environment.now()))
+    }
+
+    /// The app is no longer active: nothing runs until it is again.
+    func resignedActive() async {
+        parts.stopTasks(at: environment.now())
+    }
+
     func didBecomeActive(afterBackground seconds: TimeInterval) async {
         guard let engine = parts.engine else { return }
         await engine.enteredForeground()
@@ -170,8 +207,8 @@ final class Runtime: Sendable {
         await engine.didBecomeActive(afterBackground: seconds)
     }
 
-    /// The timer while the app is active: the launch delay, then a check every `nextCheckIn`; each wait also counts
-    /// as foreground time. Stops after `iterations` checks (nil: until cancelled).
+    /// The timer while the app is active: the launch delay, then a check every `nextCheckIn`. Stops after
+    /// `iterations` checks (nil: until cancelled).
     func runSchedule(iterations: Int?) async {
         await environment.sleep(Schedule.launchDelay(random: environment.random()))
         var done = 0
@@ -180,17 +217,10 @@ final class Runtime: Sendable {
             done += 1
             if let iterations, done >= iterations { return }
             await environment.sleep(report.nextCheckIn)
-            await parts.engine?.foregroundElapsed(report.nextCheckIn)
         }
     }
 
     /// The app's active localization; a storyboard-only app reports "Base", which is never a language.
-    /// The app became active: the probation timer and the update schedule run until `resignedActive()`.
-    func becameActive() async {}
-
-    /// The app is no longer active: nothing runs in the background.
-    func resignedActive() async {}
-
     static func appLanguage(of bundle: Bundle) -> String {
         if let first = bundle.preferredLocalizations.first, first != "Base" { return first }
         return bundle.infoDictionary?["CFBundleDevelopmentRegion"] as? String ?? "en"
