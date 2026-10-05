@@ -68,15 +68,71 @@ actor Store {
     }
 
     func stage(checksum: String, hash: String, fileType: String, verifiedBytes: Data) throws {
-        throw StoreError.notImplemented
+        try Store.requireSafe(checksum: checksum, hash: hash, fileType: fileType)
+        guard Store.sha256Hex(verifiedBytes) == hash else { throw StoreError.hashMismatch }
+        let staging = stagingDirectory(checksum)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        // The leading dot keeps a half-written file from matching what `stagedObjects` accepts.
+        let temp = staging.appendingPathComponent(".\(UUID().uuidString).tmp")
+        let target = staging.appendingPathComponent("\(hash).\(fileType)")
+        do {
+            try verifiedBytes.write(to: temp)
+            guard rename(temp.path, target.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            throw error
+        }
+        if state.stagingChecksum != checksum {
+            var next = state
+            next.stagingChecksum = checksum
+            try save(next)
+        }
     }
 
     func stagedObjects(checksum: String) -> Set<String> {
-        []
+        guard Store.isSafe(checksum: checksum) else { return [] }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: stagingDirectory(checksum).path)) ?? []
+        return Set(names.filter { name in
+            let parts = name.split(separator: ".", omittingEmptySubsequences: false)
+            return parts.count == 2 && Store.isSafe(hash: String(parts[0])) && Store.isSafe(fileType: String(parts[1]))
+                && isRegularFile(stagingDirectory(checksum).appendingPathComponent(name))
+        })
     }
 
     func heldObject(hash: String, fileType: String) -> URL? {
-        nil
+        if let checksum = state.stagingChecksum, Store.isSafe(checksum: checksum) {
+            let staged = stagingDirectory(checksum).appendingPathComponent("\(hash).\(fileType)")
+            if stagedObjects(checksum: checksum).contains(staged.lastPathComponent) { return staged }
+        }
+        return nil
+    }
+
+    private func stagingDirectory(_ checksum: String) -> URL {
+        directory.appendingPathComponent("staging/\(checksum)", isDirectory: true)
+    }
+
+    private func isRegularFile(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+    }
+
+    private static func requireSafe(checksum: String, hash: String, fileType: String) throws {
+        guard isSafe(checksum: checksum) else { throw StoreError.unsafeName(checksum) }
+        guard isSafe(hash: hash) else { throw StoreError.unsafeName(hash) }
+        guard isSafe(fileType: fileType) else { throw StoreError.unsafeName(fileType) }
+    }
+
+    private static func isSafe(checksum: String) -> Bool { isSafe(hash: checksum) }
+
+    private static func isSafe(hash: String) -> Bool {
+        hash.utf8.count == 64 && hash.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102) }
+    }
+
+    private static func isSafe(fileType: String) -> Bool {
+        !fileType.isEmpty && fileType.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 122) }
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        hex(SHA256.hash(data: data))
     }
 
     func makeInstall(_ plan: InstallPlan) throws -> InstallRecord {
