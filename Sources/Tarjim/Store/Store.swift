@@ -50,6 +50,8 @@ actor Store {
     private var protectedDirectories: Set<String> = []
     /// Built but not yet recorded: `cleanup` may run in between. Recording one releases only that one; an
     /// abandoned build stays until the next launch's cleanup.
+    /// `<hash>.<fileType>` to candidate files; rebuilt after anything that can change what is on disk or what is bad.
+    private var heldIndex: [String: [URL]]?
     private var unrecordedInstalls: Set<String> = []
 
     init(root: URL, identifier: String, sdkVersion: String) throws {
@@ -80,12 +82,17 @@ actor Store {
 
     /// state.json is data from disk: its names become path components, so they are checked like server input.
     private static func sanitised(_ state: StoreState) -> StoreState {
+        var state = namesSanitised(state)
+        if !(1...maxInstallNumber).contains(state.nextInstallNumber) { state.nextInstallNumber = 1 }
+        return state
+    }
+
+    private static func namesSanitised(_ state: StoreState) -> StoreState {
         var state = state
         if let checksum = state.stagingChecksum, !isSafe(checksum: checksum) { state.stagingChecksum = nil }
         if let record = state.active, !isConsistent(record) { state.active = nil }
         if let record = state.previous, !isConsistent(record) { state.previous = nil }
         if let record = state.pending, !isConsistent(record) { state.pending = nil }
-        if !(1...maxInstallNumber).contains(state.nextInstallNumber) { state.nextInstallNumber = 1 }
         return state
     }
 
@@ -97,6 +104,8 @@ actor Store {
     }
 
     func save(_ state: StoreState) throws {
+        let state = Store.namesSanitised(state)
+        heldIndex = nil
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let data = try encoder.encode(state)
@@ -116,6 +125,7 @@ actor Store {
     func stage(checksum: String, hash: String, fileType: String, verifiedBytes: Data) throws {
         try Store.requireSafe(checksum: checksum, hash: hash, fileType: fileType)
         guard Store.sha256Hex(verifiedBytes) == hash else { throw StoreError.hashMismatch }
+        heldIndex = nil
         let staging = stagingDirectory(checksum)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         // The leading dot keeps a half-written file from matching what `stagedObjects` accepts.
@@ -146,16 +156,22 @@ actor Store {
     }
 
     func heldObject(hash: String, fileType: String) -> URL? {
-        if let staged = stateStagingCandidate(hash: hash, fileType: fileType) { return staged }
-        return installedCandidates()["\(hash).\(fileType)"]?.first { FileManager.default.fileExists(atPath: $0.path) }
+        if heldIndex == nil { heldIndex = buildHeldIndex() }
+        // A file cut short keeps its name; what is held must be what `makeInstall` would accept.
+        return heldIndex?["\(hash).\(fileType)"]?.first {
+            (try? Data(contentsOf: $0)).map { Store.sha256Hex($0) == hash } ?? false
+        }
     }
 
-    /// A bad release's leftovers are never a source, even before cleanup has removed them.
-    private func stateStagingCandidate(hash: String, fileType: String) -> URL? {
-        guard let checksum = state.stagingChecksum, Store.isSafe(checksum: checksum),
-              !state.badChecksums.contains(checksum) else { return nil }
-        let name = "\(hash).\(fileType)"
-        return stagedObjects(checksum: checksum).contains(name) ? stagingDirectory(checksum).appendingPathComponent(name) : nil
+    private func buildHeldIndex() -> [String: [URL]] {
+        var index = installedCandidates()
+        // The staging directory goes first: it is the freshest source.
+        if let checksum = state.stagingChecksum, Store.isSafe(checksum: checksum), !state.badChecksums.contains(checksum) {
+            for name in stagedObjects(checksum: checksum) {
+                index[name, default: []].insert(stagingDirectory(checksum).appendingPathComponent(name), at: 0)
+            }
+        }
+        return index
     }
 
     /// `<hash>.<fileType>` to the files of every install on disk that lists it, newest install first. Any install, not
@@ -237,21 +253,26 @@ actor Store {
             try? fileManager.removeItem(at: build)
             try fileManager.createDirectory(at: build, withIntermediateDirectories: true)
             let sources = InstallSources(store: self, plan: plan)
+            var candidates: [(slot: Slot, hash: String, data: Data?)] = []
             for slot in installableSlots(plan) {
                 guard let hash = plan.listed[slot] else { continue }
                 guard Store.isSafe(hash: hash) else { throw StoreError.unsafeName(hash) }
-                // On a case-insensitive volume `EN` and `en` are one file; the first slot keeps it.
+                candidates.append((slot, hash, sources.verifiedData(hash: hash, fileType: slot.fileType)))
+            }
+            // Slots with bytes first, so a case twin with nothing to write cannot take the path from one that has.
+            for (slot, hash, data) in candidates.filter({ $0.data != nil }) + candidates.filter({ $0.data == nil }) {
+                var content = data
+                var contentHash = hash
+                if content == nil {
+                    owed.insert(slot)
+                    guard let carried = sources.activeData(for: slot) else { continue }
+                    (content, contentHash) = (carried.0, carried.1)
+                }
+                guard let content else { continue }
+                // On a case-insensitive volume `EN` and `en` are one file; the first one written keeps it.
                 guard claimedPaths.insert(Store.relativePath(of: slot).lowercased()).inserted else { continue }
-                if let data = sources.verifiedData(hash: hash, fileType: slot.fileType) {
-                    try writeFile(data, in: build, slot: slot, baseLocale: plan.baseLocale)
-                    written[Store.key(for: slot)] = hash
-                    continue
-                }
-                owed.insert(slot)
-                if let (data, activeHash) = sources.activeData(for: slot) {
-                    try writeFile(data, in: build, slot: slot, baseLocale: plan.baseLocale)
-                    written[Store.key(for: slot)] = activeHash
-                }
+                try writeFile(content, in: build, slot: slot, baseLocale: plan.baseLocale)
+                written[Store.key(for: slot)] = contentHash
             }
             try plan.manifestRaw.write(to: build.appendingPathComponent("manifest.json"))
             let record = InstallManifest(checksum: plan.checksum, releaseId: plan.releaseId, files: written)
@@ -261,6 +282,7 @@ actor Store {
             try? fileManager.removeItem(at: build)
             throw error
         }
+        heldIndex = nil
         unrecordedInstalls.insert(name)
         InstallNumbers.record(number, for: directory)
         var next = state
@@ -409,6 +431,7 @@ actor Store {
 
     /// Removes what nothing names; returns the removed paths relative to `<root>/Tarjim`.
     func cleanup() throws -> [String] {
+        heldIndex = nil
         let tarjim = directory.deletingLastPathComponent().deletingLastPathComponent()
         var removed: [String] = []
         let keptInstalls = Set([state.active, state.previous, state.pending].compactMap { $0?.directory }).union(protectedDirectories).union(unrecordedInstalls)
