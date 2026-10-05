@@ -1,0 +1,9 @@
+{
+  "provenance": "hand-built",
+  "status": 404,
+  "headers": {
+    "Content-Type": "application/problem+json; charset=utf-8",
+    "X-Tarjim-Api-Version": "2026-07-29"
+  },
+  "body": "{\"type\":\"https://api.tarjim.io/problems/delivery.manifest_not_found\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"No such manifest has been served to this key's stage.\",\"code\":\"delivery.manifest_not_found\"}"
+}
