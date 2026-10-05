@@ -11,8 +11,17 @@ enum MainBundleProxy {
         let source: Bundle
     }
 
-    /// Downloaded text for a key in a table, or nil to let the bundle answer as it would have.
-    typealias Downloaded = @Sendable (_ key: String, _ table: String?) -> DownloadedText?
+    /// What the resolver decided for a lookup.
+    enum Answer {
+        case downloaded(DownloadedText)
+        /// The app's own text, already read: asking the original again would reach it a second time.
+        case app(String)
+        /// The app has no text and neither has the download; Apple's `value`-or-key answer applies.
+        case missed
+    }
+
+    /// The answer for a key in a table, or nil to let the bundle answer as it would have.
+    typealias Downloaded = @Sendable (_ key: String, _ table: String?) -> Answer?
 
     private typealias StringLookup = @convention(c) (AnyObject, Selector, NSString, NSString?, NSString?) -> NSString
     private typealias AttributedLookup = @convention(c) (AnyObject, Selector, NSString, NSString?, NSString?) -> NSAttributedString
@@ -97,12 +106,22 @@ enum MainBundleProxy {
         return call(bundle, stringSelector, key as NSString, value as NSString?, table as NSString?) as String
     }
 
+    private static func applesFallback(_ key: NSString, _ value: NSString?) -> String {
+        if let value, value.length > 0 { return value as String }
+        return key as String
+    }
+
     private static func makeSubclass(of base: AnyClass) -> AnyClass? {
         guard let subclass = objc_allocateClassPair(base, "Tarjim_" + NSStringFromClass(base), 0) else { return nil }
 
         let string: @convention(block) (AnyObject, NSString, NSString?, NSString?) -> NSString = { bundle, key, value, table in
             guard let state = state(of: bundle) else { return ((value as String?) ?? (key as String)) as NSString }
-            if let hit = state.downloaded(key as String, table as String?) { return hit.value as NSString }
+            switch state.downloaded(key as String, table as String?) {
+            case .downloaded(let hit): return hit.value as NSString
+            case .app(let text): return text as NSString
+            case .missed: return applesFallback(key, value) as NSString
+            case nil: break
+            }
             return callOriginal(state, bundle, key as String, value as String?, table as String?) as NSString
         }
         class_addMethod(subclass, stringSelector, imp_implementationWithBlock(string), "@@:@@@")
@@ -111,13 +130,16 @@ enum MainBundleProxy {
             let attributed: @convention(block) (AnyObject, NSString, NSString?, NSString?) -> NSAttributedString = {
                 bundle, key, value, table in
                 guard let state = state(of: bundle) else { return NSAttributedString(string: (value as String?) ?? (key as String)) }
-                if let hit = state.downloaded(key as String, table as String?) {
+                switch state.downloaded(key as String, table as String?) {
+                case .downloaded(let hit):
                     // Apple's own lookup on the locale folder keeps plural rules, language and markdown.
                     if let imp = class_getMethodImplementation(object_getClass(hit.source), attributedSelector) {
                         let call = unsafeBitCast(imp, to: AttributedLookup.self)
                         return call(hit.source, attributedSelector, key, nil, nil)
                     }
                     return NSAttributedString(string: hit.value)
+                case .missed: return NSAttributedString(string: applesFallback(key, value))
+                case .app, nil: break
                 }
                 guard let imp = class_getMethodImplementation(state.base, attributedSelector) else {
                     return NSAttributedString(string: (value as String?) ?? (key as String))
@@ -134,19 +156,26 @@ enum MainBundleProxy {
 extension Resolver {
     /// Downloaded text only, unformatted, for a lookup Apple routed to the main bundle: a table named `nil` or
     /// `Localizable` is the default bundle; any other is the namespace of that name, else the custom bundle of that name.
-    func downloaded(_ key: String, table: String?) -> MainBundleProxy.DownloadedText? {
+    func downloaded(_ key: String, table: String?) -> MainBundleProxy.Answer? {
         let snapshot = snapshot()
         guard let selection = snapshot.selection else { return nil }
         // As in `string`: for a fallback selection the app's own text comes before the download.
-        if selection.kind == .fallback,
-           MainBundleProxy.original(app.bundle, key: key, value: Self.sentinel, table: table) != Self.sentinel { return nil }
+        var appMissed = false
+        if selection.kind == .fallback {
+            let own = MainBundleProxy.original(app.bundle, key: key, value: Self.sentinel, table: table)
+            if own != Self.sentinel { return .app(own) }
+            appMissed = true
+        }
         let bundle: TarjimBundle
         if let table, table != "Localizable" {
             bundle = BundleDirectory.id(for: .namespace(table), in: snapshot.entries) != nil ? .namespace(table) : .custom(table)
         } else {
             bundle = defaultBundle
         }
-        guard let id = BundleDirectory.id(for: bundle, in: snapshot.entries) else { return nil }
-        return ota(raw: key, snapshot: snapshot, id: id, locales: selection.locales)
+        let hit = BundleDirectory.id(for: bundle, in: snapshot.entries).flatMap {
+            ota(raw: key, snapshot: snapshot, id: $0, locales: selection.locales)
+        }
+        if let hit { return .downloaded(hit) }
+        return appMissed ? .missed : nil
     }
 }
