@@ -27,13 +27,3 @@ struct DeliveryClient: Sendable {
         .unfetchable(status: -1)
     }
 }
-
-enum Verifier {
-    static func sha256Hex(_ data: Data) -> String {
-        ""
-    }
-
-    static func matches(_ data: Data, sha256Hex expected: String) -> Bool {
-        false
-    }
-}
