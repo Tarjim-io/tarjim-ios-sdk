@@ -156,7 +156,7 @@ struct Resolver: Sendable {
     }
 
     // A real translation can be any string, so a miss is told apart by a value no one would write.
-    private static let sentinel = "tarjim-missing-" + String(UnicodeScalar(1))
+    static let sentinel = "tarjim-missing-" + String(UnicodeScalar(1))
 
     private func resolve(_ key: String, arguments: [CVarArg]?, bundle: TarjimBundle?) -> String {
         let snapshot = snapshot()
@@ -228,9 +228,11 @@ struct Resolver: Sendable {
     }
 
     /// The OTA lookup without formatting, for the proxy.
-    func ota(raw key: String, snapshot: Snapshot, id: String, locales: [String]) -> String? {
+    func ota(raw key: String, snapshot: Snapshot, id: String, locales: [String]) -> MainBundleProxy.DownloadedText? {
         for locale in locales {
-            if let lproj = snapshot.otaBundle(id: id, locale: locale), let value = found(lproj, key, table: nil) { return value }
+            if let lproj = snapshot.otaBundle(id: id, locale: locale), let value = found(lproj, key, table: nil) {
+                return MainBundleProxy.DownloadedText(value: value, source: lproj)
+            }
         }
         return nil
     }
