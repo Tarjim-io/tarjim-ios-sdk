@@ -116,6 +116,8 @@ private struct Fetched {
 private enum Finish {
     case settled(CycleOutcome, interval: Int)
     case backoff(retryAfter: Int?)
+    /// `meta` named another release while the cycle worked: nothing is recorded, and it counts as a failure.
+    case superseded
 }
 
 /// What a cycle step decided; `conclude` turns it into persisted state.
@@ -124,8 +126,6 @@ private struct Verdict {
     var held: Signature?
     var rejected: String?
     var pollAfter: Int?
-    /// The failure streak is neither extended nor ended.
-    var keepsStep = false
 }
 
 /// A manifest read once: the listed files and the slots to hold, computed a single time per cycle.
@@ -228,16 +228,23 @@ extension UpdateCycle {
         switch verdict.finish {
         case let .settled(outcome, settledInterval):
             interval = Bounds.interval(settledInterval)
-            if !verdict.keepsStep { state.backoffStep = 0 }
+            state.backoffStep = 0
             let delay = min(Schedule.pollDelay(pollAfter: interval, random: environment.random()), TimeInterval(Bounds.day))
             report = CycleReport(outcome: outcome, nextCheckIn: delay)
-        case let .backoff(retryAfter):
+        case .backoff, .superseded:
             // The step counts from where the cycle began; 1 000 doublings is far past any cap.
             state.backoffStep = min(max(start.backoffStep, 0), 1_000) + 1
             let known = Bounds.poll(verdict.pollAfter ?? start.lastPollAfter ?? 1800)
-            let wait = Schedule.backoff(step: state.backoffStep, pollAfter: known, retryAfter: Bounds.retry(retryAfter))
+            var retryAfter: Int?
+            if case let .backoff(value) = verdict.finish { retryAfter = value }
+            var wait = Schedule.backoff(step: state.backoffStep, pollAfter: known, retryAfter: Bounds.retry(retryAfter))
+            var outcome = CycleOutcome.failed
+            if case .superseded = verdict.finish {
+                wait = max(wait, 60)
+                outcome = .unchanged
+            }
             interval = Bounds.interval(Int(wait.rounded(.up)))
-            report = CycleReport(outcome: .failed, nextCheckIn: TimeInterval(interval))
+            report = CycleReport(outcome: outcome, nextCheckIn: TimeInterval(interval))
         }
         state.checkInterval = interval
         remembered = (now, interval)
@@ -308,7 +315,7 @@ extension UpdateCycle {
     private func retryMissing(_ newest: InstallRecord, _ signature: Signature, interval: Int) async -> Verdict {
         let unchanged = Verdict(finish: .settled(.unchanged, interval: interval), held: signature)
         guard let layout = installedLayout(newest) else { return unchanged }
-        let missing = missingSlots(layout, in: newest)
+        let missing = missingSlots(layout, in: newest, includingOwed: true)
         guard !missing.isEmpty else { return unchanged }
         var signature = signature
         let fetched = await fetch(missing, layout: layout, signature: &signature)
@@ -318,10 +325,8 @@ extension UpdateCycle {
         return await build(layout, checksum: newest.checksum, releaseId: signature.meta.releaseId, signature: signature, interval: interval)
     }
 
-    /// `meta` moved on while this cycle worked, so nothing is recorded. The floor, not zero, so that a `meta`
-    /// flapping between releases cannot loop without delay.
     private func supersededVerdict() -> Verdict {
-        Verdict(finish: .settled(.unchanged, interval: 60), keepsStep: true)
+        Verdict(finish: .superseded)
     }
 
     // MARK: Language change
@@ -332,7 +337,7 @@ extension UpdateCycle {
         let wait = remaining(state, now: now)
         let unchanged = CycleReport(outcome: .unchanged, nextCheckIn: wait)
         guard let newest = newestInstall(state), let layout = installedLayout(newest) else { return unchanged }
-        let missing = missingSlots(layout, in: newest)
+        let missing = missingSlots(layout, in: newest, includingOwed: false)
         guard !missing.isEmpty else { return unchanged }
 
         var signature: Signature
@@ -398,9 +403,12 @@ extension UpdateCycle {
         return layout(of: manifest, raw: raw)
     }
 
-    private func missingSlots(_ layout: Layout, in install: InstallRecord) -> [Slot] {
+    private func missingSlots(_ layout: Layout, in install: InstallRecord, includingOwed: Bool) -> [Slot] {
         // An owed slot may carry the active install's older file, so having a file does not mean it is held.
-        layout.wanted.filter { install.owedSlots.contains($0) || environment.store.fileURL(of: install, slot: $0) == nil }
+        layout.wanted.filter { slot in
+            if install.owedSlots.contains(slot) { return includingOwed }
+            return environment.store.fileURL(of: install, slot: slot) == nil
+        }
     }
 
     /// Obtains what is not already held. `obtained` counts slots fetched now or found held.
