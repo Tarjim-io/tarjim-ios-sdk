@@ -34,7 +34,7 @@ final class Device {
     let server = DeliveryServer()
     let clock = TestClock()
     let selection: TestSelection
-    let store: Store
+    private(set) var store: Store
 
     init(_ test: XCTestCase, locales: [String] = ["en"]) throws {
         root = try StoreFixtures.root(for: test)
@@ -47,6 +47,11 @@ final class Device {
         let client = DeliveryClient(endpoint: try DeliveryFixtures.endpoint(), identity: DeliveryFixtures.identity, transport: server)
         return UpdateCycle(CycleEnvironment(client: client, store: store, now: { clock.now }, random: { 0 },
                                             selectLocales: { selection.select($0) }))
+    }
+
+    /// A new process: a fresh Store over the same root, so state.json is read back from disk.
+    func relaunch() throws {
+        store = try StoreFixtures.store(root)
     }
 
     var state: StoreState {

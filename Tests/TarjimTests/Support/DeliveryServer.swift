@@ -11,6 +11,13 @@ final class DeliveryServer: Transport, @unchecked Sendable {
     private var objects: [String: Data] = [:]          // "<hash>.<type>" → bytes
     private var objectOverrides: [String: [FakeTransport.Answer]] = [:]
     private var offline = false
+    private var manifestOverrides: [FakeTransport.Answer] = []
+    /// Runs (synchronously, on the request's thread) before each object answer — a hook for "meanwhile" writes.
+    var onObjectRequest: (@Sendable () -> Void)? {
+        get { lock.withLock { objectHook } }
+        set { lock.withLock { objectHook = newValue } }
+    }
+    private var objectHook: (@Sendable () -> Void)?
     private var recorded: [URLRequest] = []
 
     var requests: [URLRequest] { lock.withLock { recorded } }
@@ -37,6 +44,11 @@ final class DeliveryServer: Transport, @unchecked Sendable {
         lock.withLock { objectOverrides["\(hash).\(fileType)"] = answers }
     }
 
+    /// Answers the next manifest requests in order, then manifests by checksum again.
+    func answerManifest(_ answers: FakeTransport.Answer...) {
+        lock.withLock { manifestOverrides = answers }
+    }
+
     func goOffline(_ value: Bool = true) {
         lock.withLock { offline = value }
     }
@@ -46,6 +58,7 @@ final class DeliveryServer: Transport, @unchecked Sendable {
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if Release.isObject(request.url!) { onObjectRequest?() }
         let answer = try lock.withLock { () throws -> FakeTransport.Answer in
             recorded.append(request)
             if offline { throw FakeTransport.Offline() }
@@ -56,6 +69,7 @@ final class DeliveryServer: Transport, @unchecked Sendable {
                 return first
             }
             if url.lastPathComponent == "manifest.json" {
+                if !manifestOverrides.isEmpty { return manifestOverrides.removeFirst() }
                 let checksum = url.deletingLastPathComponent().lastPathComponent
                 guard let bytes = manifests[checksum] else { return FakeTransport.Answer(status: 404) }
                 return FakeTransport.Answer(status: 200, body: bytes)
@@ -124,6 +138,13 @@ struct Release {
         meta["manifestUrl"] = "https://cdn.example.invalid/releases/1/\(checksum)/manifest.json"
         meta["pollAfter"] = 1800
         return Release(releaseId: releaseId, checksum: checksum, manifest: manifest, metaBody: meta, objects: objects)
+    }
+
+    /// This release's 200 `meta`, optionally with a renewed signature.
+    func metaAnswer(signedQuery: String? = nil) -> FakeTransport.Answer {
+        var body = metaBody
+        if let signedQuery { body["signedQuery"] = signedQuery }
+        return .json(200, body, headers: ["ETag": "\"m\(releaseId)-\(checksum.prefix(8))\""])
     }
 
     /// The hash the manifest lists for a slot.

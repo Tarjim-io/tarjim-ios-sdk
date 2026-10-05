@@ -66,6 +66,7 @@ final class UpdateCycleTests: XCTestCase {
         try await device.runAndActivate()
         device.server.resetRequests()
         device.clock.advance(1799)
+        try device.relaunch()
         let report = try await device.cycle().run()
         XCTAssertEqual(report.outcome, .notDue)
         XCTAssertEqual(report.nextCheckIn, 1, accuracy: 0.001)
@@ -144,15 +145,17 @@ final class UpdateCycleTests: XCTestCase {
     /// A revoked key that is restored later must recover without an app update.
     func testAConfigurationErrorKeepsPollingAtTheKnownCadence() async throws {
         let device = try Device(self)
-        let release = try Release.one()
+        var release = try Release.one()
+        release = Release(releaseId: release.releaseId, checksum: release.checksum, manifest: release.manifest,
+                          metaBody: release.metaBody.merging(["pollAfter": 900]) { $1 }, objects: release.objects)
         device.server.publish(release)
         try await device.runAndActivate()
-        device.clock.advance(1800)
+        device.clock.advance(900)
         device.server.answerMeta(CycleFixtures.problem(401, code: "unauthorized"))
         let report = try await device.cycle().run()
         XCTAssertEqual(report.outcome, .configurationError(code: "unauthorized"))
-        XCTAssertEqual(report.nextCheckIn, 1800)
-        device.clock.advance(1800)
+        XCTAssertEqual(report.nextCheckIn, 900, "the last pollAfter known, not the default")
+        device.clock.advance(900)
         device.server.publish(release)
         let result2 = try await device.cycle().run()
         XCTAssertEqual(result2.outcome, .unchanged)
@@ -161,6 +164,11 @@ final class UpdateCycleTests: XCTestCase {
     /// A cold stage: nothing deleted, its own `pollAfter` (60 when absent), no other route tried.
     func testNothingReleasedYetIsSilentAndDeletesNothing() async throws {
         let device = try Device(self)
+        device.server.publish(try Release.one())
+        try await device.runAndActivate()
+        let active = await device.state.active
+        device.clock.advance(1800)
+        device.server.resetRequests()
         device.server.answerMeta(CycleFixtures.problem(404, code: "delivery.stage_unreleased", pollAfter: 600))
         var report = try await device.cycle().run()
         XCTAssertEqual(report.outcome, .unreleased)
@@ -170,6 +178,9 @@ final class UpdateCycleTests: XCTestCase {
         report = try await device.cycle().run()
         XCTAssertEqual(report.nextCheckIn, 60)
         XCTAssertEqual(device.server.requests.count, device.server.metaRequests.count, "only meta, never another route")
+        let state = await device.state
+        XCTAssertEqual(state.active, active)
+        XCTAssertNotNil(try device.file(state.active, en))
     }
 
     func testAManifestFailingItsChecksumIsAFailureAndNothingIsStaged() async throws {
@@ -281,6 +292,7 @@ final class UpdateCycleTests: XCTestCase {
         let device = try Device(self)
         let release = try Release.one()
         device.server.publish(release)
+        device.server.answerMeta(release.metaAnswer(), release.metaAnswer(signedQuery: "Policy=RENEWED&Signature=RENEWED&Key-Pair-Id=RENEWED"))
         device.server.answerObject(hash: try release.hash(of: en), fileType: "strings", try DeliveryFixtures.error("object-403-cdn-edge"))
         let report = try await device.cycle().run()
         guard case .installed(let install) = report.outcome else { return XCTFail("\(report)") }
