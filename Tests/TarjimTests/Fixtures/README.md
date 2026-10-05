@@ -9,6 +9,8 @@ Server answers the tests replay. Nothing here is fetched at test time.
 - `recorded/<name>/` holds a recording made by `scripts/capture-fixtures.sh`: the layout of `release-1/`
   for one delivery mode, plus its own `errors/`.
 - `golden/` holds the server writer's own corpus files for `.strings` and `.stringsdict`, verbatim.
+- `proxy-ui/` holds a storyboard and a xib with their compiled forms, for the main-bundle proxy's UIKit tests;
+  `scripts/compile-proxy-ui-fixtures.sh` regenerates the compiled files from the sources beside them.
 
 An envelope is `{provenance, status, headers, body}`; `body` is the response body as a string, or null.
 

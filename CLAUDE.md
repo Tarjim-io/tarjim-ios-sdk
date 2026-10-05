@@ -14,6 +14,7 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
   `scripts/verify-test-report.py --report <file>.xml ...` (see its docstring). `--parallel` is required,
   otherwise XCTest writes no report.
 - Record fixtures from a live server: `scripts/capture-fixtures.sh --help`.
+- Rebuild the compiled storyboard and xib fixtures: `scripts/compile-proxy-ui-fixtures.sh`.
 
 ## Layout
 
@@ -34,6 +35,11 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
     after an hour away or at once when nothing is held; a 10 s foreground probation and a revert after two crashed
     launches), the `Reporter` turns cycle signals into once-per-condition reports, `Log` is the one logging call site,
     and `Runtime` wires these behind the public `Tarjim` API. Checks and timers run only while the app is active.
+  - `Proxy/` patches the main bundle (on by default, `interceptsMainBundle = false` turns it off) so
+    `NSLocalizedString`, storyboards, xibs and SwiftUI `Text` in the default environment get downloaded text: a subclass of
+    whatever class the bundle has at install time, the same lookup order as `Tarjim.string`, and the original
+    implementation, asked once, on a miss. Not reached: an explicit `.environment(\.locale, …)`, `String(localized:)`,
+    `CFBundleCopyLocalizedString`.
 - `Tests/TarjimTests`: tests; `Tests/TarjimTests/Fixtures` holds hand-built server answers and, under
   `recorded/<name>/`, recordings (see the README there).
 - `scripts`: capture and test-report tooling.
