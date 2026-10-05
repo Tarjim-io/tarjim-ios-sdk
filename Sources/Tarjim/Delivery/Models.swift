@@ -42,6 +42,26 @@ struct Manifest: Decodable, Sendable, Equatable {
     var baseLocale: String?
     var bundles: [String: BundleEntry]
     var slices: [String: [String: [String: SliceEntry]]]
+
+    private enum CodingKeys: String, CodingKey { case schemaVersion, baseLocale, bundles, slices }
+
+    /// A file type this SDK does not know may carry another entry shape; it is dropped so the
+    /// rest of the release still installs.
+    private struct LenientEntry: Decodable {
+        let entry: SliceEntry?
+        init(from decoder: Decoder) throws {
+            entry = try? SliceEntry(from: decoder)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        baseLocale = try c.decodeIfPresent(String.self, forKey: .baseLocale)
+        bundles = try c.decode([String: BundleEntry].self, forKey: .bundles)
+        let raw = try c.decode([String: [String: [String: LenientEntry]]].self, forKey: .slices)
+        slices = raw.mapValues { $0.mapValues { $0.compactMapValues(\.entry) } }
+    }
 }
 
 struct BundleEntry: Decodable, Sendable, Equatable {
@@ -64,4 +84,11 @@ extension Meta: CustomStringConvertible, CustomDebugStringConvertible {
     }
 
     var debugDescription: String { description }
+}
+
+extension Meta: CustomReflectable {
+    var customMirror: Mirror {
+        Mirror(self, children: ["checksum": checksum, "schemaVersion": schemaVersion, "authenticated": authenticated,
+                                "releaseId": releaseId as Any, "pollAfter": pollAfter], displayStyle: .struct)
+    }
 }
