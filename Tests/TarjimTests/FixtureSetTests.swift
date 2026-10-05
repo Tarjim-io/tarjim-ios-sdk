@@ -152,8 +152,11 @@ final class FixtureSetTests: XCTestCase {
     }
 
     func testEveryEnvelopeDeclaresItsProvenance() throws {
-        let envelopes = try Fixtures.allFiles().filter { $0.hasSuffix(".json") && !$0.hasSuffix("manifest.json") }
-        XCTAssertFalse(envelopes.isEmpty)
+        // Manifests and `objects/` hold raw served bytes, not envelopes.
+        let envelopes = try Fixtures.allFiles().filter {
+            $0.hasSuffix(".json") && !$0.hasSuffix("manifest.json") && !$0.contains("/objects/")
+        }
+        XCTAssertGreaterThanOrEqual(envelopes.count, 16)
         for path in envelopes {
             XCTAssertTrue(["hand-built", "recorded"].contains(try Fixtures.envelope(path).provenance), path)
         }
