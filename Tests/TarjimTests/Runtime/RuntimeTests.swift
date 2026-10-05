@@ -10,6 +10,8 @@ final class RuntimeHarness {
     let appBundle: Bundle
     let reports = TestValue<[TarjimReport]>([])
     let sleeps = TestValue<[TimeInterval]>([])
+    /// Waits that return at once; after these, a wait lasts until its task is cancelled (as a real timer would).
+    let instantSleeps = TestValue<Int>(1_000)
 
     init(_ test: XCTestCase) throws {
         root = try StoreFixtures.root(for: test)
@@ -26,10 +28,15 @@ final class RuntimeHarness {
     }
 
     func make(_ configuration: TarjimConfiguration? = nil) throws -> Runtime {
-        let clock = self.clock, sleeps = self.sleeps
+        let clock = self.clock, sleeps = self.sleeps, instantSleeps = self.instantSleeps
         let environment = Runtime.Environment(root: root, transport: server, appBundle: appBundle,
                                               preferences: { ["en-US"] }, appLanguage: { "en" }, now: { clock.now },
-                                              random: { 0 }, sleep: { seconds in sleeps.value.append(seconds) },
+                                              random: { 0 }, sleep: { seconds in
+                                                  sleeps.value.append(seconds)
+                                                  if sleeps.value.count > instantSleeps.value {
+                                                      try? await Task.sleep(nanoseconds: 3_600_000_000_000)
+                                                  }
+                                              },
                                               sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4")
         return try Runtime(configuration: configuration ?? self.configuration(), environment: environment)
     }
