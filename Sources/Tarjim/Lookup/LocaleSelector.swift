@@ -62,3 +62,23 @@ enum LocaleSelector {
         return (components[NSLocale.Key.languageCode.rawValue], components[NSLocale.Key.scriptCode.rawValue])
     }
 }
+
+extension LocaleSelector {
+    static var hasLikelySubtags: Bool {
+        if #available(iOS 16, macOS 13, *) { return true }
+        return false
+    }
+
+    static func match(preference: String, available: [String], likelySubtags: Bool) -> [String] {
+        []
+    }
+
+    static func preferenceList(preferences: [String], appLanguage: String, likelySubtags: Bool) -> [String] {
+        []
+    }
+
+    /// The script a language tag is written in, from a fixed table: what likely subtags give, for OS versions without them.
+    static func tableScript(_ identifier: String) -> String? {
+        nil
+    }
+}

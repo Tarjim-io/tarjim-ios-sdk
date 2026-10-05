@@ -41,7 +41,7 @@ enum LookupFixtures {
     }
 
     /// The app's own resources: `en` (development language) and `ar`, a `checkout` table in `en`.
-    static func appBundle(for test: XCTestCase) throws -> Bundle {
+    static func appBundle(for test: XCTestCase, extra: [String: String] = [:]) throws -> Bundle {
         let directory = try temporaryDirectory(for: test).appendingPathComponent("App.bundle", isDirectory: true)
         let info: [String: Any] = ["CFBundleIdentifier": "com.example.app", "CFBundleDevelopmentRegion": "en", "CFBundlePackageType": "BNDL"]
         try write(PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0), to: directory.appendingPathComponent("Info.plist"))
@@ -59,11 +59,25 @@ enum LookupFixtures {
         try write(plural(["one": "%d app item", "other": "%d app items"]), to: directory.appendingPathComponent("en.lproj/Localizable.stringsdict"))
         try write(plural(["zero": "لا شيء", "one": "واحد", "two": "اثنان", "few": "%d قليلة", "many": "%d كثيرة", "other": "%d أخرى"]),
                   to: directory.appendingPathComponent("ar.lproj/Localizable.stringsdict"))
+        for (path, text) in extra {
+            try write(Data(text.utf8), to: directory.appendingPathComponent(path))
+        }
         return try XCTUnwrap(Bundle(url: directory))
     }
 
-    static func app(for test: XCTestCase, language: String = "en") throws -> AppResources {
-        AppResources(bundle: try appBundle(for: test), language: language)
+    static func app(for test: XCTestCase, language: String = "en", extra: [String: String] = [:]) throws -> AppResources {
+        AppResources(bundle: try appBundle(for: test, extra: extra), language: language)
+    }
+
+    /// An app the size of a real one: 40 localizations, ten tables each.
+    static func largeApp(for test: XCTestCase) throws -> AppResources {
+        var extra: [String: String] = [:]
+        for index in 0..<40 {
+            for table in 0..<10 {
+                extra["l\(index).lproj/Table\(table).strings"] = "\"k\(table)\" = \"v\(index)\";"
+            }
+        }
+        return try app(for: test, extra: extra)
     }
 
     static func resolver(app: AppResources, install: URL?, selection: LocaleSelection?, entries: [ManifestBundle] = entries,
