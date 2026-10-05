@@ -14,10 +14,25 @@ struct DeliveryEndpoint: Sendable, Equatable {
     let metaURL: URL
 
     init(host: URL, projectId: Int, apiKey: String) throws {
-        self.host = host
+        guard let parts = URLComponents(url: host, resolvingAgainstBaseURL: false),
+              let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let name = parts.host, !name.isEmpty,
+              parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+              parts.path.isEmpty || parts.path == "/"
+        else { throw Error.invalidHost }
+
+        var origin = URLComponents()
+        origin.scheme = scheme
+        origin.host = name
+        origin.port = parts.port
+        var meta = origin
+        meta.path = "/projects/\(projectId)/delivery/meta"
+        guard let originURL = origin.url, let metaURL = meta.url else { throw Error.invalidHost }
+
+        self.host = originURL
         self.projectId = projectId
         self.apiKey = apiKey
-        metaURL = host
+        self.metaURL = metaURL
     }
 }
 
@@ -32,6 +47,15 @@ struct ClientIdentity: Sendable, Equatable {
     var installIdentifier: String?
 
     var userAgent: String {
-        ""
+        var agent = "Tarjim-iOS/\(sdkVersion) app/\(appVersion) iOS/\(osVersion) lang/\(language)"
+        if let installIdentifier {
+            agent += " install/\(installIdentifier)"
+        }
+        return agent
     }
+}
+
+extension DeliveryEndpoint: CustomStringConvertible, CustomDebugStringConvertible {
+    var description: String { "DeliveryEndpoint(host: \(host.absoluteString), projectId: \(projectId))" }
+    var debugDescription: String { description }
 }
