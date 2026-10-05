@@ -94,7 +94,9 @@ actor Engine {
     /// Runs one update cycle if due and acts on its result.
     @discardableResult
     func check() async -> CycleReport {
-        await launchTask?.value
+        // Before launch has begun a cycle could install and activate ahead of the crash count.
+        guard let launchTask else { return CycleReport(outcome: .notDue, nextCheckIn: 0) }
+        await launchTask.value
         await refreshOverride()
         let state = await environment.store.state
         let known = (state.pending ?? state.active)?.checksum
@@ -129,14 +131,20 @@ actor Engine {
 
     /// Foreground time accumulated in this process.
     func foregroundElapsed(_ seconds: TimeInterval) async {
-        await launchTask?.value
+        guard let launchTask else { return }
+        await launchTask.value
         guard seconds.isFinite, seconds >= 0 else { return }
-        foregroundSeconds += seconds
-        guard foregroundSeconds >= Engine.probationSeconds else { return }
-        try? await environment.store.update { state in
-            guard state.probation != nil else { return }
-            state.probation = nil
-            state.launchCrashCount = 0
+        // Inside the activation lock, so a tick never closes the probation of an install activated meanwhile.
+        await exclusive {
+            foregroundSeconds += seconds
+            guard foregroundSeconds >= Engine.probationSeconds else { return }
+            let store = environment.store
+            guard let open = await store.state.probation else { return }
+            try? await store.update { state in
+                guard state.probation == open else { return }
+                state.probation = nil
+                state.launchCrashCount = 0
+            }
         }
     }
 
