@@ -79,6 +79,7 @@ def main():
     parser.add_argument("--expect", choices=["failing", "passing"])
     parser.add_argument("--since")
     parser.add_argument("--tests", default="Tests", help="test sources that must not skip (default: Tests)")
+    parser.add_argument("--renames", help='JSON {"Suite.oldName": "Suite.newName"}: declared tests renamed on purpose; the successor must pass')
     args = parser.parse_args()
 
     if not os.path.isdir(args.tests):
@@ -123,9 +124,17 @@ def main():
             fail(f"report {path} written {modified.isoformat()} is older than --since {since.isoformat()}")
     freshness = f"every report file written >= {since.isoformat()}"
 
+    renames = {}
+    if args.renames:
+        with open(args.renames, encoding="utf-8") as handle:
+            renames = {tuple(k.rsplit(".", 1)): tuple(v.rsplit(".", 1)) for k, v in json.load(handle).items()}
     wanted = "failed" if args.expect == "failing" else "passed"
     problems = []
+    applied = []
     for suite, name in declared:
+        if (suite, name) in renames and (suite, name) not in results:
+            applied.append(f"{name} -> {renames[(suite, name)][1]}")
+            suite, name = renames[(suite, name)]
         outcome = results.get((suite, name))
         if outcome is None:
             problems.append(f"missing from report: {suite}.{name}")
@@ -138,7 +147,8 @@ def main():
             print(f"  {problem}", file=sys.stderr)
         fail(f"{len(problems)} problem(s) against {args.declared}")
 
-    print(f"[OK] {len(declared)} declared tests {wanted}; {len(results)} in report; freshness: {freshness}")
+    renamed = f"; renamed: {', '.join(applied)}" if applied else ""
+    print(f"[OK] {len(declared)} declared tests {wanted}; {len(results)} in report; freshness: {freshness}{renamed}")
 
 
 if __name__ == "__main__":
