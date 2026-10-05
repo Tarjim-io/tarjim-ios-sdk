@@ -37,6 +37,8 @@ actor Reporter {
     private var logged: Set<String> = []
     private var mismatchRuns: [String: Int] = [:]
     private var owedRuns: [String: Int] = [:]
+    /// Identities being delivered; a second raise of one meanwhile would pass the delivered check too.
+    private var inFlight: Set<String> = []
 
     init(store: Store, handler: (@Sendable (TarjimReport) -> Void)?) {
         self.store = store
@@ -49,12 +51,14 @@ actor Reporter {
         var mismatches: Set<String> = []
         var fileMismatches: [String] = []
         var answered = false
+        var stillRejected: [String] = []
         for signal in signals {
             switch signal {
             case .metaAnswered: answered = true
             case let .owed(hashes): owed = hashes
             case let .manifestChecksumMismatch(checksum): mismatches.insert(checksum)
             case let .fileHashMismatch(hash): fileMismatches.append(hash)
+            case let .stillRejected(checksum): stillRejected.append(checksum)
             case let .installed(schemaVersion, hasStrings, _):
                 if schemaVersion == 1 { await clear(prefix: "schema:") }
                 if hasStrings { await clear(prefix: "no-strings:") }
@@ -63,19 +67,29 @@ actor Reporter {
         if answered { await clear(prefix: "config:") }
 
         switch report.outcome {
-        case let .rejected(_, .unknownSchema(version)):
-            await raise("schema:\(version)", .unknownSchemaVersion(version),
-                        "The release uses manifest format \(version), which this SDK does not know.")
+        case let .rejected(checksum, .unknownSchema(version)):
+            await remember(rejection: checksum, as: "schema:\(version)")
+            await raise("schema:\(version)")
         case let .rejected(checksum, .noStrings):
-            await raise("no-strings:\(checksum)", .noStringsInRelease(checksum: checksum),
-                        "The release \(checksum) has no iOS strings.")
+            await remember(rejection: checksum, as: "no-strings:\(checksum)")
+            await raise("no-strings:\(checksum)")
         case let .configurationError(code):
             await raise("config:\(code)", .configuration(code: code), "The key or its binding is rejected: \(code).")
         default:
             break
         }
+        if !stillRejected.isEmpty {
+            let held = await store.state.rejectionReports
+            for checksum in stillRejected { if let identity = held[checksum] { await raise(identity) } }
+        }
 
-        for checksum in mismatchRuns.keys where !mismatches.contains(checksum) { mismatchRuns[checksum] = nil }
+        // A cycle that never reached the server says nothing about a manifest.
+        if answered {
+            for checksum in mismatchRuns.keys where !mismatches.contains(checksum) { mismatchRuns[checksum] = nil }
+            for checksum in await identities(prefix: "checksum:") where !mismatches.contains(checksum) {
+                await clear(identity: "checksum:\(checksum)")
+            }
+        }
         for checksum in mismatches.sorted() {
             let run = (mismatchRuns[checksum] ?? 0) + 1
             mismatchRuns[checksum] = run
@@ -84,15 +98,15 @@ actor Reporter {
                             "The manifest \(checksum) failed its checksum in two cycles in a row.")
             }
         }
-        for checksum in await identities(prefix: "checksum:") where !mismatches.contains(checksum) {
-            await clear(identity: "checksum:\(checksum)")
-        }
 
         for hash in fileMismatches {
             await raise("hash:\(hash)", .fileHashMismatch(hash: hash), "The downloaded file \(hash) failed its hash.")
         }
         guard let owed else { return }
-        for hash in await identities(prefix: "hash:") where !owed.contains(hash) { await clear(identity: "hash:\(hash)") }
+        // A cycle whose own download failed the hash again has not resolved it, even though it built nothing to owe.
+        for hash in await identities(prefix: "hash:") where !owed.contains(hash) && !fileMismatches.contains(hash) {
+            await clear(identity: "hash:\(hash)")
+        }
         for hash in owedRuns.keys where !owed.contains(hash) {
             owedRuns[hash] = nil
             await clear(identity: "owed:\(hash)")
@@ -114,7 +128,28 @@ actor Reporter {
 
     // MARK: Delivery
 
+    /// Raises a rejection by the identity stored for it.
+    private func raise(_ identity: String) async {
+        if identity.hasPrefix("schema:"), let version = Int(identity.dropFirst("schema:".count)) {
+            await raise(identity, .unknownSchemaVersion(version),
+                        "The release uses manifest format \(version), which this SDK does not know.")
+        } else if identity.hasPrefix("no-strings:") {
+            let checksum = String(identity.dropFirst("no-strings:".count))
+            await raise(identity, .noStringsInRelease(checksum: checksum), "The release \(checksum) has no iOS strings.")
+        }
+    }
+
+    /// Written whether or not a handler exists, so one added in a later app version still hears it.
+    private func remember(rejection checksum: String, as identity: String) async {
+        guard await store.state.rejectionReports[checksum] != identity else { return }
+        try? await store.update { $0.rejectionReports[checksum] = identity }
+    }
+
     private func raise(_ identity: String, _ kind: TarjimReport.Kind, _ message: String) async {
+        // Marked before the first suspension: a concurrent raise of the same identity would otherwise also find it
+        // undelivered.
+        guard inFlight.insert(identity).inserted else { return }
+        defer { inFlight.remove(identity) }
         let delivered = await store.state.deliveredReports.contains(identity)
         if !delivered, logged.insert(identity).inserted { Log.debug(message) }
         guard let handler, !delivered else { return }

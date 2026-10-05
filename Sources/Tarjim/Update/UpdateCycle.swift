@@ -53,6 +53,8 @@ enum CycleSignal: Equatable, Sendable {
     case owed(hashes: Set<String>)
     /// A new install was built from a manifest of this schema version.
     case installed(schemaVersion: Int, hasStrings: Bool, checksum: String)
+    /// `meta` named a checksum that was rejected earlier; nothing was fetched.
+    case stillRejected(checksum: String)
 }
 
 struct CycleReport: Equatable, Sendable {
@@ -321,6 +323,7 @@ extension UpdateCycle {
             return Verdict(finish: .settled(.discardedPending, interval: interval), held: signature)
         }
         if state.rejectedChecksums.contains(meta.checksum) || state.badChecksums.contains(meta.checksum) {
+            if state.rejectedChecksums.contains(meta.checksum) { seen.append(.stillRejected(checksum: meta.checksum)) }
             return Verdict(finish: .settled(.skipped, interval: interval))
         }
         return await install(changed: signature, interval: interval)
