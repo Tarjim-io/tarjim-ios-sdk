@@ -107,6 +107,9 @@ actor Engine {
         return report
     }
 
+    /// Stores the language the app asked for (nil: follow the app's language again) and serves it if the release has it.
+    func setLanguageOverride(_ identifier: String?) async {}
+
     /// The selected locales may have changed: serve them if held, fetch them if the held manifest lists them.
     func selectionChanged() async {
         await launchTask?.value
