@@ -338,8 +338,9 @@ final class UpdateCycleTests: XCTestCase {
         let release = try Release.one()
         device.server.publish(release)
         let hash = try release.hash(of: en)
+        // Gone on the first cycle; the re-read brings the same signature, so it waits for the next due cycle (C14).
         let gone = try DeliveryFixtures.error("object-404-slice-not-found")
-        device.server.answerObject(hash: hash, fileType: "strings", gone, gone)
+        device.server.answerObject(hash: hash, fileType: "strings", gone)
         try await device.runAndActivate()
         device.clock.advance(1800)
         let report = try await device.cycle().run()
@@ -392,6 +393,7 @@ final class LanguageChangeTests: XCTestCase {
         device.server.publish(release)
         try await device.runAndActivate()
         device.server.resetRequests()
+        device.server.answerMeta(release.metaAnswer(signedQuery: "Policy=RENEWED&Signature=RENEWED&Key-Pair-Id=RENEWED"))
         device.server.answerObject(hash: try release.hash(of: CycleFixtures.arStrings), fileType: "strings",
                                    try DeliveryFixtures.error("object-403-cdn-edge"))
         device.selection.set(["ar"])
