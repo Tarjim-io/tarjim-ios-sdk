@@ -100,7 +100,8 @@ final class LanguageOverrideTests: XCTestCase {
         XCTAssertEqual(before.launchCrashCount, 0)
         await process.engine.launch(foreground: true)
         let after = await process.state
-        XCTAssertEqual(after.launchCrashCount, 1, "only the earlier launch's open probation counts")
+        XCTAssertEqual(after.launchCrashCount, 0, "the install shown for the choice starts its own probation clean")
+        XCTAssertEqual(after.probation, after.active?.directory)
         XCTAssertEqual(process.string("app.title"), "ترجم")
     }
 
