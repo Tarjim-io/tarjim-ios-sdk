@@ -285,7 +285,7 @@ final class UpdateCycleTests: XCTestCase {
         XCTAssertEqual(device.server.manifestRequests.count, 0)
     }
 
-    // MARK: Unfetchable objects (C14, C15)
+    // MARK: Unfetchable objects
 
     /// A 403 on an object: `meta` is read again ONCE, without If-None-Match, and the object retried with it.
     func testAnExpiredSignatureIsRenewedOnceAndRetried() async throws {
@@ -338,7 +338,7 @@ final class UpdateCycleTests: XCTestCase {
         let release = try Release.one()
         device.server.publish(release)
         let hash = try release.hash(of: en)
-        // Gone on the first cycle; the re-read brings the same signature, so it waits for the next due cycle (C14).
+        // Gone on the first cycle; the re-read brings the same signature, so it waits for the next due cycle.
         let gone = try DeliveryFixtures.error("object-404-slice-not-found")
         device.server.answerObject(hash: hash, fileType: "strings", gone)
         try await device.runAndActivate()
