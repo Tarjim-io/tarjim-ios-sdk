@@ -5,33 +5,32 @@ import ObjectiveC
 /// in the default environment all ask the main bundle. The bundle's class is replaced, at install time, by a subclass of
 /// whatever class it has then, so an earlier patch by another library keeps working.
 enum MainBundleProxy {
+    /// A downloaded answer and the locale folder it came from, which can also answer the attributed lookup.
+    struct DownloadedText {
+        let value: String
+        let source: Bundle
+    }
+
     /// Downloaded text for a key in a table, or nil to let the bundle answer as it would have.
-    typealias Downloaded = @Sendable (_ key: String, _ table: String?) -> String?
+    typealias Downloaded = @Sendable (_ key: String, _ table: String?) -> DownloadedText?
 
     private typealias StringLookup = @convention(c) (AnyObject, Selector, NSString, NSString?, NSString?) -> NSString
     private typealias AttributedLookup = @convention(c) (AnyObject, Selector, NSString, NSString?, NSString?) -> NSAttributedString
 
     private static let stringSelector = NSSelectorFromString("localizedStringForKey:value:table:")
     private static let attributedSelector = NSSelectorFromString("localizedAttributedStringForKey:value:table:")
-
-    /// What one patched subclass calls on a miss: the implementations of the class it replaced.
-    private final class Originals: @unchecked Sendable {
-        let string: IMP
-        let attributed: IMP?
-
-        init(string: IMP, attributed: IMP?) {
-            self.string = string
-            self.attributed = attributed
-        }
-    }
+    private static let classSelector = NSSelectorFromString("class")
 
     private final class State: @unchecked Sendable {
         let downloaded: Downloaded
-        let originals: Originals
+        /// The class the bundle had before install; its implementations are looked up per call.
+        let base: AnyClass
+        let subclass: AnyClass
 
-        init(downloaded: @escaping Downloaded, originals: Originals) {
+        init(downloaded: @escaping Downloaded, base: AnyClass, subclass: AnyClass) {
             self.downloaded = downloaded
-            self.originals = originals
+            self.base = base
+            self.subclass = subclass
         }
     }
 
@@ -39,90 +38,108 @@ enum MainBundleProxy {
     nonisolated(unsafe) private static var stateKey: UInt8 = 0
     private static let lock = NSLock()
     // One subclass per base class: registering a second class of the same name would fail.
-    nonisolated(unsafe) private static var subclasses: [ObjectIdentifier: (AnyClass, Originals)] = [:]
+    nonisolated(unsafe) private static var subclasses: [ObjectIdentifier: AnyClass] = [:]
 
     /// Patches `bundle` once; a second call does nothing and returns false.
     @discardableResult
     static func install(on bundle: Bundle, downloaded: @escaping Downloaded) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard state(of: bundle) == nil else { return false }
-        guard let base = object_getClass(bundle) else { return false }
-        let (subclass, originals): (AnyClass, Originals)
+        guard !isInstalled(on: bundle), let base = object_getClass(bundle),
+              class_getInstanceMethod(base, stringSelector) != nil else { return false }
+        // KVO and similar isa-swizzles keep state in indexed ivars of their class that a subclass of it lacks.
+        guard let reported = bundle.perform(classSelector)?.takeUnretainedValue(), reported === base else { return false }
+        let subclass: AnyClass
         if let known = subclasses[ObjectIdentifier(base)] {
-            (subclass, originals) = known
+            subclass = known
         } else {
             guard let made = makeSubclass(of: base) else { return false }
             subclasses[ObjectIdentifier(base)] = made
-            (subclass, originals) = made
+            subclass = made
         }
-        objc_setAssociatedObject(bundle, &stateKey, State(downloaded: downloaded, originals: originals),
+        objc_setAssociatedObject(bundle, &stateKey, State(downloaded: downloaded, base: base, subclass: subclass),
                                  .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         object_setClass(bundle, subclass)
         return true
     }
 
+    /// True while the bundle's class is ours or a subclass of it; another library's later swap ends that.
     static func isInstalled(on bundle: Bundle) -> Bool {
-        state(of: bundle) != nil
+        installedState(of: bundle) != nil
     }
 
     /// The lookup as the bundle answered it before `install`; the app's own text, never Tarjim's, never recursing.
     static func original(_ bundle: Bundle, key: String, value: String?, table: String?) -> String {
-        guard let originals = state(of: bundle)?.originals else {
+        guard let state = installedState(of: bundle) else {
             return bundle.localizedString(forKey: key, value: value, table: table)
         }
-        return callOriginal(originals, bundle, key, value, table)
+        return callOriginal(state, bundle, key, value, table)
     }
 
-    private static func state(of bundle: Bundle) -> State? {
+    private static func state(of bundle: AnyObject) -> State? {
         objc_getAssociatedObject(bundle, &stateKey) as? State
     }
 
-    private static func callOriginal(_ originals: Originals, _ bundle: AnyObject, _ key: String, _ value: String?,
+    private static func installedState(of bundle: Bundle) -> State? {
+        guard let state = state(of: bundle) else { return nil }
+        var current: AnyClass? = object_getClass(bundle)
+        while let candidate = current {
+            if candidate === state.subclass { return state }
+            current = class_getSuperclass(candidate)
+        }
+        return nil
+    }
+
+    private static func callOriginal(_ state: State, _ bundle: AnyObject, _ key: String, _ value: String?,
                                      _ table: String?) -> String {
-        let call = unsafeBitCast(originals.string, to: StringLookup.self)
+        guard let imp = class_getMethodImplementation(state.base, stringSelector) else { return value ?? key }
+        let call = unsafeBitCast(imp, to: StringLookup.self)
         return call(bundle, stringSelector, key as NSString, value as NSString?, table as NSString?) as String
     }
 
-    private static func makeSubclass(of base: AnyClass) -> (AnyClass, Originals)? {
-        guard class_getInstanceMethod(base, stringSelector) != nil,
-              let stringIMP = class_getMethodImplementation(base, stringSelector),
-              let subclass = objc_allocateClassPair(base, "Tarjim_" + NSStringFromClass(base), 0) else { return nil }
-        let originals = Originals(
-            string: stringIMP,
-            attributed: class_getInstanceMethod(base, attributedSelector) == nil
-                ? nil : class_getMethodImplementation(base, attributedSelector))
+    private static func makeSubclass(of base: AnyClass) -> AnyClass? {
+        guard let subclass = objc_allocateClassPair(base, "Tarjim_" + NSStringFromClass(base), 0) else { return nil }
 
         let string: @convention(block) (AnyObject, NSString, NSString?, NSString?) -> NSString = { bundle, key, value, table in
-            if let bundle = bundle as? Bundle, let hit = state(of: bundle)?.downloaded(key as String, table as String?) {
-                return hit as NSString
-            }
-            return callOriginal(originals, bundle, key as String, value as String?, table as String?) as NSString
+            guard let state = state(of: bundle) else { return ((value as String?) ?? (key as String)) as NSString }
+            if let hit = state.downloaded(key as String, table as String?) { return hit.value as NSString }
+            return callOriginal(state, bundle, key as String, value as String?, table as String?) as NSString
         }
         class_addMethod(subclass, stringSelector, imp_implementationWithBlock(string), "@@:@@@")
 
-        if let original = originals.attributed {
+        if class_getInstanceMethod(base, attributedSelector) != nil {
             let attributed: @convention(block) (AnyObject, NSString, NSString?, NSString?) -> NSAttributedString = {
                 bundle, key, value, table in
-                if let bundle = bundle as? Bundle, let hit = state(of: bundle)?.downloaded(key as String, table as String?) {
-                    return NSAttributedString(string: hit)
+                guard let state = state(of: bundle) else { return NSAttributedString(string: (value as String?) ?? (key as String)) }
+                if let hit = state.downloaded(key as String, table as String?) {
+                    // Apple's own lookup on the locale folder keeps plural rules, language and markdown.
+                    if let imp = class_getMethodImplementation(object_getClass(hit.source), attributedSelector) {
+                        let call = unsafeBitCast(imp, to: AttributedLookup.self)
+                        return call(hit.source, attributedSelector, key, nil, nil)
+                    }
+                    return NSAttributedString(string: hit.value)
                 }
-                let call = unsafeBitCast(original, to: AttributedLookup.self)
-                return call(bundle, attributedSelector, key, value, table)
+                guard let imp = class_getMethodImplementation(state.base, attributedSelector) else {
+                    return NSAttributedString(string: (value as String?) ?? (key as String))
+                }
+                return unsafeBitCast(imp, to: AttributedLookup.self)(bundle, attributedSelector, key, value, table)
             }
             class_addMethod(subclass, attributedSelector, imp_implementationWithBlock(attributed), "@@:@@@")
         }
         objc_registerClassPair(subclass)
-        return (subclass, originals)
+        return subclass
     }
 }
 
 extension Resolver {
     /// Downloaded text only, unformatted, for a lookup Apple routed to the main bundle: a table named `nil` or
     /// `Localizable` is the default bundle; any other is the namespace of that name, else the custom bundle of that name.
-    func downloaded(_ key: String, table: String?) -> String? {
+    func downloaded(_ key: String, table: String?) -> MainBundleProxy.DownloadedText? {
         let snapshot = snapshot()
         guard let selection = snapshot.selection else { return nil }
+        // As in `string`: for a fallback selection the app's own text comes before the download.
+        if selection.kind == .fallback,
+           MainBundleProxy.original(app.bundle, key: key, value: Self.sentinel, table: table) != Self.sentinel { return nil }
         let bundle: TarjimBundle
         if let table, table != "Localizable" {
             bundle = BundleDirectory.id(for: .namespace(table), in: snapshot.entries) != nil ? .namespace(table) : .custom(table)
