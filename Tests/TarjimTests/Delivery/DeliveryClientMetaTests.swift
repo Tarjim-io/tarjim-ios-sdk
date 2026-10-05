@@ -125,8 +125,8 @@ final class DeliveryClientMetaTests: XCTestCase {
         }
     }
 
-    /// The server before the stage amendment answers a cold key with these codes; they are the same
-    /// normal state, not a misconfiguration to report.
+    /// An older server answers a cold key with these codes; they are the same normal state, not a
+    /// misconfiguration to report.
     func testOlderUnreleasedCodesAreUnreleasedToo() async throws {
         for code in ["delivery.track_unreleased", "delivery.not_published"] {
             let (outcome, _) = try await fetch(.json(404, ["status": 404, "code": code, "pollAfter": 60],

@@ -60,7 +60,10 @@ final class DeliveryClientManifestTests: XCTestCase {
         var meta = try DeliveryFixtures.meta("cdn")
         meta.signedQuery = nil
         let (_, transport) = try await fetch(meta, try manifestAnswer())
-        XCTAssertEqual(try XCTUnwrap(transport.requests.first).url?.absoluteString, meta.manifestUrl)
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.url?.absoluteString, meta.manifestUrl)
+        XCTAssertEqual(request.tarjimHeaders, [:], "a CDN request without a signature is still a CDN request")
+        XCTAssertNil(request.value(forHTTPHeaderField: "User-Agent"))
         meta.signedQuery = ""
         let (_, again) = try await fetch(meta, try manifestAnswer())
         XCTAssertEqual(try XCTUnwrap(again.requests.first).url?.absoluteString, meta.manifestUrl)
