@@ -389,15 +389,17 @@ actor Store {
 
     /// Reads, changes and saves the state in one step: no other write can land in between.
     func update(_ change: (inout StoreState) throws -> Void) throws {
-        throw StoreError.missingInstall("update")
+        var next = state
+        try change(&next)
+        try save(next)
+    }
+
+    func activate(_ install: InstallRecord) throws {
+        try activate(install, alsoChange: { _ in })
     }
 
     /// Activates and applies `alsoChange` in the same save.
     func activate(_ install: InstallRecord, alsoChange: (inout StoreState) -> Void) throws {
-        throw StoreError.missingInstall("activate")
-    }
-
-    func activate(_ install: InstallRecord) throws {
         try requireOnDisk(install)
         var next = state
         // Same release again (a language change) must not displace the last other release: a launch-crash revert of
@@ -405,6 +407,7 @@ actor Store {
         if next.active?.checksum != install.checksum { next.previous = next.active }
         if next.active?.directory != install.directory { next.active = install }
         if next.pending?.directory == install.directory { next.pending = nil }
+        alsoChange(&next)
         try save(next)
         unrecordedInstalls.remove(install.directory)
     }
