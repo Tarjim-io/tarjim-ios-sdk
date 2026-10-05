@@ -53,6 +53,9 @@ struct StoreState: Codable, Equatable, Sendable {
     }
 
     func isCheckDue(now: Date, pollAfter: Int) -> Bool {
-        false
+        guard let lastCheck else { return true }
+        // A clock moved back must not stall polling until the old time comes round again.
+        if lastCheck > now { return true }
+        return now.timeIntervalSince(lastCheck) >= TimeInterval(pollAfter)
     }
 }
