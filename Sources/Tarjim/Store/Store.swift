@@ -301,11 +301,16 @@ actor Store {
         return number
     }
 
+    /// Whether an install can hold this slot; the cycle asks so it never waits for a file the Store would not write.
+    nonisolated static func canInstall(_ slot: Slot) -> Bool {
+        (slot.fileType == "strings" || slot.fileType == "stringsdict")
+            && isSafeComponent(slot.bundleId) && isSafeComponent(slot.locale)
+    }
+
     /// Only Apple's two formats with names safe as path components; anything else is neither written nor owed.
     private func installableSlots(_ plan: InstallPlan) -> [Slot] {
         plan.wanted.intersection(plan.listed.keys)
-            .filter { ($0.fileType == "strings" || $0.fileType == "stringsdict")
-                && Store.isSafeComponent($0.bundleId) && Store.isSafeComponent($0.locale) }
+            .filter(Store.canInstall)
             .sorted { Store.key(for: $0) < Store.key(for: $1) }
     }
 
