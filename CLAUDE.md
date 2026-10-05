@@ -24,6 +24,9 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
   - `Store/` is the only code that writes files: one store per (host, project, key) under Application Support,
     verified objects staged by hash, immutable install directories, `state.json` replaced atomically, cleanup of
     whatever nothing names. The SDK keeps exactly one `Store` per root.
+  - `Lookup/` picks the locales to serve (Apple's matcher plus a same-language, same-script check) and answers
+    lookups from one immutable snapshot: downloaded text, then the app's own text, then the key. Nothing in a lookup
+    touches the file system; each string is formatted with the locale it was found in.
 - `Tests/TarjimTests`: tests; `Tests/TarjimTests/Fixtures` holds hand-built server answers and, under
   `recorded/<name>/`, recordings (see the README there).
 - `scripts`: capture and test-report tooling.
@@ -31,8 +34,6 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
 Planned components (not built yet):
 
 - `Scheduler`: when to check for updates; foreground only.
-- `LocaleSelector`: picks the locale to serve.
-- `Resolver`: lookup chain over an immutable snapshot.
 - `Reporter`: local reports only; no network.
 
 ## Rules
