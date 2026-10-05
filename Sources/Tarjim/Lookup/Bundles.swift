@@ -25,10 +25,11 @@ enum BundleDirectory {
             .min { lowerId($0.id, than: $1.id) }?.id
     }
 
-    // Numeric order so `ns7` precedes `ns10`; without digits (or on a tie) the plain string order decides.
+    // Numeric order so `ns7` precedes `ns10`; ids without digits sort last. The id breaks ties, which keeps the
+    // order total and the answer independent of the entries' order.
     private static func lowerId(_ a: String, than b: String) -> Bool {
-        if let x = trailingNumber(a), let y = trailingNumber(b), x != y { return x < y }
-        return a < b
+        let x = trailingNumber(a) ?? Int.max, y = trailingNumber(b) ?? Int.max
+        return x != y ? x < y : a < b
     }
 
     private static func trailingNumber(_ id: String) -> Int? {
