@@ -108,4 +108,18 @@ final class MainBundleProxyEdgeTests: XCTestCase {
         XCTAssertEqual(bundle.localizedString(forKey: "swizzled.only", value: nil, table: nil), "From the swizzler")
         XCTAssertEqual(bundle.localizedString(forKey: "app.title", value: nil, table: nil), "Tarjim")
     }
+
+    /// For a fallback user too, a key missing everywhere reaches the app's own lookup exactly once.
+    func testAFallbackMissAsksTheAppOnce() throws {
+        let bundle = try LookupFixtures.appBundle(for: self)
+        object_setClass(bundle, CountingBundle.self)
+        CountingBundle.reset()
+        let resolver = LookupFixtures.resolver(app: AppResources(bundle: bundle, language: "en"), install: try LookupFixtures.install(for: self),
+                                               selection: LocaleSelection(kind: .fallback, locales: ["ar"]))
+        XCTAssertTrue(MainBundleProxy.install(on: bundle) { key, table in resolver.downloaded(key, table: table) })
+        XCTAssertEqual(bundle.localizedString(forKey: "nowhere", value: "v", table: nil), "v")
+        XCTAssertEqual(CountingBundle.count, 1)
+        XCTAssertEqual(bundle.localizedString(forKey: "nowhere", value: nil, table: nil), "nowhere")
+        XCTAssertEqual(CountingBundle.count, 2)
+    }
 }
