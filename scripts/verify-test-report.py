@@ -30,13 +30,16 @@ def fail(message, code=1):
     sys.exit(code)
 
 
+def report_files(path):
+    """The report and, when present, the sibling where `swift test` writes Swift Testing results."""
+    stem, extension = os.path.splitext(path)
+    sibling = f"{stem}-swift-testing{extension}"
+    return [path, sibling] if os.path.exists(sibling) else [path]
+
+
 def read_report(path):
     roots = []
-    # `swift test` writes Swift Testing results to a sibling file; a failure there must count too.
-    stem, extension = os.path.splitext(path)
-    for candidate in (path, f"{stem}-swift-testing{extension}"):
-        if candidate != path and not os.path.exists(candidate):
-            continue
+    for candidate in report_files(path):
         try:
             roots.append(ET.parse(candidate).getroot())
         except (OSError, ET.ParseError) as error:
@@ -114,10 +117,11 @@ def main():
         fail("the declared list is empty")
 
     since = parse_since(args.since)
-    modified = datetime.datetime.fromtimestamp(os.path.getmtime(args.report), datetime.timezone.utc)
-    if modified < since:
-        fail(f"report written {modified.isoformat()} is older than --since {since.isoformat()}")
-    freshness = f"written {modified.isoformat()} >= {since.isoformat()}"
+    for path in report_files(args.report):
+        modified = datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.timezone.utc)
+        if modified < since:
+            fail(f"report {path} written {modified.isoformat()} is older than --since {since.isoformat()}")
+    freshness = f"every report file written >= {since.isoformat()}"
 
     wanted = "failed" if args.expect == "failing" else "passed"
     problems = []
