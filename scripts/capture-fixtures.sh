@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #/ DESCRIPTION:
-#/   Records a project's current release from the delivery routes into the fixture layout the tests
-#/   read (Tests/TarjimTests/Fixtures/release-1): meta, manifest, every object, and two error
-#/   answers (a request without the version header, and one with an invalid key). Every hash is
-#/   verified against the manifest and the manifest against meta before anything is written.
+#/   Records a project's current release from the delivery routes into the layout the fixture
+#/   tests read (see Tests/TarjimTests/Fixtures/README.md): meta.<mode>.json, manifest.json, every
+#/   object, and the answer to a request made with an invalid key. Every hash is verified against
+#/   the manifest, and the manifest against meta, before anything is written.
 #/   The API key is read from the environment variable TARJIM_APIKEY only; it is never printed,
 #/   written to disk or passed on a command line.
 #/
@@ -11,14 +11,15 @@
 #/   TARJIM_APIKEY=... capture-fixtures.sh --host <url> --project <id> --out <dir> [--api-version <v>] [--help]
 #/
 #/ SYNOPSIS:
-#/   --host: API base URL; https only, except http for localhost and 127.0.0.1
+#/   --host: API base URL: https://<host>[:port][/path], or http://localhost|127.0.0.1[:port][/path]
 #/   --project: numeric project id
-#/   --out: directory to create; must not exist
+#/   --out: recording directory to create; must not exist
 #/   --api-version: value for X-Tarjim-Api-Version (default: 2026-07-29)
 #/   --help: Prints this message
 #/
-#/ Run the test suite before committing the result: its leak scan must pass, and a recording it
-#/ flags is captured again from another project, never edited.
+#/ Afterwards move the directory to Tests/TarjimTests/Fixtures/recorded/<name>/ and run
+#/ `swift test --parallel`: its leak scan must pass before the recording is committed, and a
+#/ recording it flags is captured again from another project, never edited.
 
 set -euo pipefail
 # shellcheck disable=SC2154 # ec is assigned inside the trap string
@@ -103,15 +104,12 @@ if [[ -z "${TARJIM_APIKEY:-}" ]]; then
 fi
 
 host="${host%/}"
-case "$host" in
-  https://*)
-    ;;
-  http://localhost|http://localhost:*|http://localhost/*|http://127.0.0.1|http://127.0.0.1:*|http://127.0.0.1/*)
-    ;;
-  *)
-    fail "--host must be https (http is allowed only for localhost and 127.0.0.1)"
-    ;;
-esac
+# No userinfo, query or fragment: the key must go to the host the operator typed.
+host_re='^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~-]+)*$'
+local_re='^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/[A-Za-z0-9._~-]+)*$'
+if [[ ! "$host" =~ $host_re && ! "$host" =~ $local_re ]]; then
+  fail "--host must be https://<host>[:port][/path] (http only for localhost and 127.0.0.1)"
+fi
 
 if [[ ! "$project" =~ ^[0-9]+$ ]]; then
   fail "--project must be a number"
@@ -135,42 +133,38 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# curl reads headers from a file (-H @file) so the key never appears in argv, where `ps` shows it.
+# curl reads headers and URLs from files (-H @file, -K file) so neither the key nor a signed query
+# appears in argv, where `ps` shows it.
 umask 077
 key_headers="$work/key.hdr"
 bad_key_headers="$work/badkey.hdr"
 printf 'X-Tarjim-Apikey: %s\nX-Tarjim-Api-Version: %s\n' "$TARJIM_APIKEY" "$api_version" >"$key_headers"
 printf 'X-Tarjim-Apikey: tarjim-0-0-0-invalid\nX-Tarjim-Api-Version: %s\n' "$api_version" >"$bad_key_headers"
-printf 'X-Tarjim-Apikey: %s\n' "$TARJIM_APIKEY" >"$work/key-only.hdr"
 umask 022
 
 stage="$work/stage"
 mkdir -p "$stage/objects" "$stage/errors"
 recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+url_re='^[A-Za-z0-9._~:/?&=%+,-]+$'
+
 # fetch <url> <body-file> <headers-dump-file> [header-file]  -> prints the HTTP status
 fetch() {
   local url="$1" body="$2" dump="$3" hdr="${4:-}"
-  local args=(-sS --compressed --max-time 60 -D "$dump" -o "$body" -w '%{http_code}')
+  [[ "$url" =~ $url_re ]] || fail "refusing a URL with unexpected characters"
+  local cfg
+  cfg="$(mktemp "$work/curl.XXXXXX")"
+  printf 'url = "%s"\n' "$url" >"$cfg"
+  # -q first: a ~/.curlrc must not add options. No redirects are followed, so the key stays on one host.
+  local args=(-q -sS --compressed --max-time 60 -D "$dump" -o "$body" -w '%{http_code}' -K "$cfg")
   if [[ -n "$hdr" ]]; then
     args+=(-H "@$hdr")
   fi
-  curl "${args[@]}" "$url"
+  curl "${args[@]}"
 }
 
-resolve() {
-  local base="$1" ref="$2"
-  case "$ref" in
-    *://*)
-      echo "$ref"
-      ;;
-    *)
-      echo "${base%/*}/$ref"
-      ;;
-  esac
-}
-
-keep_headers='["Content-Type","Content-Encoding","Cache-Control","ETag","Retry-After","X-Tarjim-Api-Version"]'
+# Content-Encoding is not kept: bodies are stored decoded.
+keep_headers='["Content-Type","Cache-Control","ETag","Retry-After","X-Tarjim-Api-Version"]'
 
 # write_envelope <status> <headers-dump> <body-file> <dest>
 write_envelope() {
@@ -193,22 +187,35 @@ if [[ "$status" != "200" ]]; then
   fail "meta answered $status, expected 200"
 fi
 
-checksum="$(jq -r '.checksum' <"$work/meta.body")"
-authenticated="$(jq -r '.authenticated' <"$work/meta.body")"
-manifest_ref="$(jq -r '.manifestUrl' <"$work/meta.body")"
-slices_ref="$(jq -r '.slicesBaseUrl' <"$work/meta.body")"
-
-manifest_url="$(resolve "$meta_url" "$manifest_ref")"
-slices_url="$(resolve "$meta_url" "$slices_ref")"
+# A failing jq aborts the run: command substitution in an assignment propagates its status.
+checksum="$(jq -er '.checksum | strings' <"$work/meta.body")"
+authenticated="$(jq -er '.authenticated | booleans | tostring' <"$work/meta.body")"
+manifest_ref="$(jq -er '.manifestUrl | strings' <"$work/meta.body")"
+slices_ref="$(jq -er '.slicesBaseUrl | strings' <"$work/meta.body")"
 
 if [[ "$authenticated" == "true" ]]; then
   mode="origin"
   asset_headers="$key_headers"
+  # Origin URLs are path-relative; anything else could send the key to another host.
+  for ref in "$manifest_ref" "$slices_ref"; do
+    if [[ "$ref" == *://* || "$ref" == /* || "$ref" == *..* ]]; then
+      fail "origin-mode meta carries a URL that is not path-relative"
+    fi
+  done
+  manifest_url="${meta_url%/*}/$manifest_ref"
+  slices_url="${meta_url%/*}/$slices_ref"
+  signed_query=""
 else
   mode="cdn"
   asset_headers=""
-  signed_query="$(jq -r '.signedQuery' <"$work/meta.body")"
-  manifest_url="$manifest_url?$signed_query"
+  for ref in "$manifest_ref" "$slices_ref"; do
+    if [[ "$ref" != https://* ]]; then
+      fail "CDN-mode meta carries a URL that is not https"
+    fi
+  done
+  signed_query="$(jq -er '.signedQuery | strings' <"$work/meta.body")"
+  manifest_url="$manifest_ref?$signed_query"
+  slices_url="$slices_ref"
 fi
 
 status="$(fetch "$manifest_url" "$stage/manifest.json" "$work/manifest.hdr" "$asset_headers")"
@@ -219,12 +226,14 @@ if [[ "$(sha256 "$stage/manifest.json")" != "$checksum" ]]; then
   fail "manifest sha256 does not match meta.checksum"
 fi
 
+objects="$(jq -er '[.slices[] | .[] | to_entries[] | "\(.value.hash) \(.key)"] | unique | .[]' <"$stage/manifest.json")" || fail "the manifest is not valid or lists no objects"
+
 object_count=0
 while read -r hash file_type; do
-  object="$hash.$file_type"
-  if [[ -e "$stage/objects/$object" ]]; then
-    continue
+  if [[ ! "$hash" =~ ^[0-9a-f]{64}$ || ! "$file_type" =~ ^[a-z]+$ ]]; then
+    fail "the manifest lists a malformed object: $hash $file_type"
   fi
+  object="$hash.$file_type"
   url="$slices_url$object"
   if [[ "$mode" == "cdn" ]]; then
     url="$url?$signed_query"
@@ -237,23 +246,16 @@ while read -r hash file_type; do
     fail "object $object does not match its manifest hash"
   fi
   object_count=$((object_count + 1))
-done < <(jq -r '[.slices[][] | to_entries[] | "\(.value.hash) \(.key)"] | unique | .[]' <"$stage/manifest.json")
+done <<<"$objects"
 
 # meta: drop the real host and the live signature before it is written.
-jq -c '
+jq -ec '
   def redact_host: if test("^[A-Za-z][A-Za-z0-9+.-]*://") then sub("^(?<s>[A-Za-z][A-Za-z0-9+.-]*://)[^/]+"; "\(.s)cdn.example.invalid") else . end;
   .manifestUrl |= redact_host
   | .slicesBaseUrl |= redact_host
   | if has("signedQuery") then .signedQuery = "Policy=REDACTED&Signature=REDACTED&Key-Pair-Id=REDACTED" else . end
 ' <"$work/meta.body" | tr -d '\n' >"$work/meta.redacted"
 write_envelope 200 "$work/meta.hdr" "$work/meta.redacted" "$stage/meta.$mode.json"
-
-# Error answers: the same route without the version header, and with a key that cannot exist.
-status="$(fetch "$meta_url" "$work/e400.body" "$work/e400.hdr" "$work/key-only.hdr")"
-if [[ "$status" != "400" ]]; then
-  fail "meta without the version header answered $status, expected 400"
-fi
-write_envelope 400 "$work/e400.hdr" "$work/e400.body" "$stage/errors/meta-400-validation.json"
 
 status="$(fetch "$meta_url" "$work/e401.body" "$work/e401.hdr" "$bad_key_headers")"
 if [[ "$status" != "401" ]]; then
@@ -266,5 +268,5 @@ mv "$stage" "$out"
 chmod 755 "$out"
 
 echo "Recorded $mode-mode release for project $project into $out:"
-echo "  meta.$mode.json, manifest.json, $object_count objects, errors/meta-400-validation.json, errors/meta-401-unauthorized.json"
-echo "Run 'swift test --parallel' (the leak scan) before committing. Nothing was staged in git."
+echo "  meta.$mode.json, manifest.json, $object_count objects, errors/meta-401-unauthorized.json"
+echo "Move it to Tests/TarjimTests/Fixtures/recorded/<name>/ and run 'swift test --parallel' (the leak scan) before committing. Nothing was staged in git."
