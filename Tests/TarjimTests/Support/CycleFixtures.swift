@@ -14,6 +14,39 @@ final class TestClock: @unchecked Sendable {
     }
 }
 
+/// Holds the first request it sees until released, so a test can start a second call while the first is in flight.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var armed = true
+    private let entered = DispatchSemaphore(value: 0)
+    private let opened = DispatchSemaphore(value: 0)
+
+    /// Call from the server's hook: blocks the first caller only.
+    func hold() {
+        let first = lock.withLock { () -> Bool in
+            defer { armed = false }
+            return armed
+        }
+        guard first else { return }
+        entered.signal()
+        opened.wait()
+    }
+
+    /// Returns once the first request is being held, then gives the second call time to reach the actor.
+    func waitUntilHeld() async throws {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async { [entered] in
+                entered.wait()
+                continuation.resume()
+            }
+        }
+    }
+
+    func open() {
+        opened.signal()
+    }
+}
+
 /// The locales the "user" wants; the cycle serves those the manifest lists, in this order.
 final class TestSelection: @unchecked Sendable {
     private let lock = NSLock()

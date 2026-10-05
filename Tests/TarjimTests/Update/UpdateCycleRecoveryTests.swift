@@ -123,12 +123,18 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         try await device.runAndActivate()
         device.clock.advance(1800)
         device.server.resetRequests()
-        device.selection.set(["ar"])
+        device.selection.set(["en", "ar"])
+        let gate = Gate()
+        device.server.onObjectRequest = { gate.hold() }
         let cycle = try device.cycle()
-        async let change = cycle.languageChanged()
-        async let poll = cycle.run()
-        let (_, polled) = await (change, poll)
-        XCTAssertEqual(device.server.metaRequests.count, 1)
+        let change = Task { await cycle.languageChanged() }
+        try await gate.waitUntilHeld()
+        let poll = Task { await cycle.run() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        gate.open()
+        _ = await change.value
+        let polled = await poll.value
+        XCTAssertEqual(device.server.metaRequests.count, 1, "the run read meta itself")
         XCTAssertNotEqual(polled.outcome, .notDue)
     }
 
@@ -448,14 +454,19 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         let two = try one.changing(releaseId: 43, slots: [en: Data("\"a\" = \"2\";".utf8)])
         device.server.publish(two, meta: false)
         device.server.publish(one)
-        device.server.answerMeta(one.metaAnswer(), two.metaAnswer(), one.metaAnswer(), two.metaAnswer())
+        device.server.answerMeta(one.metaAnswer(), two.metaAnswer(), one.metaAnswer(), two.metaAnswer(), one.metaAnswer(),
+                                 two.metaAnswer(), one.metaAnswer())
         let gone = try DeliveryFixtures.error("object-403-cdn-edge")
-        device.server.answerObject(hash: try one.hash(of: en), fileType: "strings", gone, gone)
-        device.server.answerObject(hash: try two.hash(of: en), fileType: "strings", gone, gone)
-        let first = try await device.cycle().run()
-        XCTAssertGreaterThanOrEqual(first.nextCheckIn, 60)
-        let immediately = try await device.cycle().run()
-        XCTAssertEqual(immediately.outcome, .notDue)
+        device.server.answerObject(hash: try one.hash(of: en), fileType: "strings", gone, gone, gone, gone)
+        var waits: [TimeInterval] = []
+        for _ in 0..<3 {
+            let report = try await device.cycle().run()
+            waits.append(report.nextCheckIn)
+            let immediately = try await device.cycle().run()
+            XCTAssertEqual(immediately.outcome, .notDue)
+            device.clock.advance(report.nextCheckIn)
+        }
+        XCTAssertEqual(waits, [60, 120, 240], "a flapping meta backs off like any failure")
     }
 
     /// A slot the Store will never write (an unsafe bundle id, a locale differing only in case) is not "missing":
@@ -533,18 +544,20 @@ final class UpdateCycleRecoveryTests: XCTestCase {
     func testALanguageChangeWaitsForARunningCycle() async throws {
         let device = try Device(self, locales: ["en"])
         device.server.publish(try Release.one())
+        let gate = Gate()
+        device.server.onObjectRequest = { gate.hold() }
         let cycle = try device.cycle()
-        async let poll = cycle.run()
+        let poll = Task { await cycle.run() }
+        try await gate.waitUntilHeld()
         device.selection.set(["en", "ar"])
-        async let change = cycle.languageChanged()
-        let (polled, changed) = await (poll, change)
+        let change = Task { await cycle.languageChanged() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        gate.open()
+        let polled = await poll.value
+        let changed = await change.value
         guard case .installed = polled.outcome else { return XCTFail("\(polled)") }
-        let state = await device.state
-        let pending = try XCTUnwrap(state.pending)
-        if case .installed(let install) = changed.outcome {
-            XCTAssertEqual(install, pending)
-        }
-        XCTAssertNotNil(try device.file(pending, ar))
+        guard case .installed(let install) = changed.outcome else { return XCTFail("\(changed)") }
+        XCTAssertNotNil(try device.file(install, ar), "it worked on what the cycle left")
     }
 
     /// A locale key the Store will not write as a folder name is never "missing" either.
@@ -557,5 +570,40 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         device.clock.advance(1800)
         let report = try await device.cycle().run()
         XCTAssertEqual(report.outcome, .unchanged)
+    }
+
+    /// Owed slots wait for due cycles; a language change with nothing new to fetch makes no request, however often
+    /// it is called.
+    func testALanguageChangeLeavesOwedSlotsToDueCycles() async throws {
+        let device = try Device(self, locales: ["en"])
+        let release = try Release.one()
+        device.server.publish(release)
+        let gone = try DeliveryFixtures.error("object-403-cdn-edge")
+        device.server.answerObject(hash: try release.hash(of: en), fileType: "strings", gone, gone, gone, gone, gone)
+        try await device.runAndActivate()
+        let owed = await device.state.active?.owedSlots
+        XCTAssertEqual(owed, [en])
+        device.server.resetRequests()
+        for _ in 0..<3 {
+            let report = try await device.cycle().languageChanged()
+            XCTAssertEqual(report.outcome, .unchanged)
+        }
+        XCTAssertEqual(device.server.requests.count, 0)
+    }
+
+    /// A held `meta` naming another release than the newest install is not used for If-None-Match.
+    func testTheETagIsNotSentWhenTheHeldMetaNamesAnotherRelease() async throws {
+        let device = try Device(self)
+        let one = try Release.one()
+        device.server.publish(one)
+        try await device.runAndActivate()
+        let two = try one.changing(releaseId: 43, slots: [en: Data("\"a\" = \"2\";".utf8)])
+        var state = await device.state
+        state.heldMeta = try JSONSerialization.data(withJSONObject: two.metaBody)
+        try await device.store.save(state)
+        device.clock.advance(1800)
+        device.server.resetRequests()
+        _ = try await device.cycle().run()
+        XCTAssertNil(device.server.metaRequests.first?.value(forHTTPHeaderField: "If-None-Match"))
     }
 }
