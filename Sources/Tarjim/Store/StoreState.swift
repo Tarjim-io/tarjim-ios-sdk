@@ -53,6 +53,8 @@ struct StoreState: Codable, Equatable, Sendable {
     var metaETag: String?
     /// The raw `meta` naming the newest install, kept for its signature (language changes, owed retries).
     var heldMeta: Data?
+    /// The directory of an install activated but not yet proven: the app has not yet stayed in the foreground long enough.
+    var probation: String?
 
     init(sdkVersion: String) {
         self.sdkVersion = sdkVersion
@@ -79,6 +81,7 @@ struct StoreState: Codable, Equatable, Sendable {
         checkInterval = try c.decodeIfPresent(Int.self, forKey: .checkInterval)
         metaETag = try c.decodeIfPresent(String.self, forKey: .metaETag)
         heldMeta = try c.decodeIfPresent(Data.self, forKey: .heldMeta)
+        probation = try c.decodeIfPresent(String.self, forKey: .probation)
     }
 
     func isCheckDue(now: Date, pollAfter: Int) -> Bool {
