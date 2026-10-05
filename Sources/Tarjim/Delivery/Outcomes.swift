@@ -1,0 +1,51 @@
+import Foundation
+
+/// One case per kind of `meta` answer the SDK must handle.
+enum MetaOutcome: Sendable, Equatable {
+    /// 200: a body the SDK could read, with the ETag to send next time.
+    case changed(Meta, etag: String?, raw: Data)
+    /// 304.
+    case notModified
+    /// 200 with a body that does not decode. Keep what is held.
+    case unreadable
+    /// 400, 401, 403, 404 (any code but `stage_unreleased`), or a 4xx without a readable body.
+    case configurationError(code: String, pollAfter: Int?)
+    /// 404 `delivery.stage_unreleased`: nothing released to this stage yet.
+    case unreleased(pollAfter: Int?)
+    /// 429.
+    case throttled(retryAfter: Int?)
+    /// 5xx, or any other status.
+    case serverError(retryAfter: Int?)
+    /// The transport threw.
+    case networkFailure
+    /// Placeholder until the behaviour exists.
+    case unexpected(status: Int)
+}
+
+enum ManifestOutcome: Sendable, Equatable {
+    /// The bytes hash to `meta.checksum` and decode.
+    case verified(Manifest, raw: Data)
+    /// The bytes do not hash to `meta.checksum`; treated as a failed fetch.
+    case checksumMismatch
+    /// The bytes hash correctly but do not decode. Keep what is held.
+    case unreadable
+    /// 403, 404 or 503 on the object: unfetchable this cycle.
+    case unfetchable(status: Int)
+    case throttled(retryAfter: Int?)
+    case serverError(retryAfter: Int?)
+    case networkFailure
+}
+
+enum ObjectOutcome: Sendable, Equatable {
+    /// The bytes hash to the manifest's `hash` (and match `size` when one was given).
+    case verified(Data)
+    /// The bytes do not hash to `hash`; they are discarded.
+    case hashMismatch
+    /// More bytes than the manifest's `size`; refused before being kept.
+    case tooLarge
+    /// 403, 404 or 503 on the object: unfetchable this cycle.
+    case unfetchable(status: Int)
+    case throttled(retryAfter: Int?)
+    case serverError(retryAfter: Int?)
+    case networkFailure
+}
