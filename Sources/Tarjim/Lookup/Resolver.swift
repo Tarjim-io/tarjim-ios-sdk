@@ -165,13 +165,15 @@ struct Resolver: Sendable {
         let id = BundleDirectory.id(for: bundle ?? defaultBundle, in: snapshot.entries)
         let locales = snapshot.selection?.locales ?? []
 
+        // Set once the app bundle itself has answered, so a miss is never asked of it twice.
+        var askedApp = false
         let steps: [() -> String?]
         switch snapshot.selection?.kind {
         case .user:
             steps = [
                 { ota(key, arguments, snapshot, id, locales) },
-                { appInSelectedLocale(key, arguments, table, locales) },
-                { appAsResolved(key, arguments, table) },
+                { appInSelectedLocale(key, arguments, table, locales, askedApp: &askedApp) },
+                { askedApp ? nil : appAsResolved(key, arguments, table) },
             ]
         case .fallback:
             steps = [
@@ -198,8 +200,16 @@ struct Resolver: Sendable {
     }
 
     private func appInSelectedLocale(_ key: String, _ arguments: [CVarArg]?, _ table: String?,
-                                     _ locales: [String]) -> String? {
+                                     _ locales: [String], askedApp: inout Bool) -> String? {
+        let resolved = app.lproj(matching: app.language)
         for locale in locales {
+            // With the proxy on, the app bundle answers for the folder it resolves to, through its original lookup:
+            // the same text, and the app's own lookup (and any earlier patch of it) is reached on every miss.
+            if MainBundleProxy.isInstalled(on: app.bundle), let resolved, app.lproj(matching: locale) === resolved {
+                askedApp = true
+                if let value = appAsResolved(key, arguments, table) { return value }
+                continue
+            }
             guard let lproj = app.lproj(matching: locale), let value = found(lproj, key, table: table) else { continue }
             return format(value, arguments, locale: locale)
         }
@@ -207,7 +217,22 @@ struct Resolver: Sendable {
     }
 
     private func appAsResolved(_ key: String, _ arguments: [CVarArg]?, _ table: String?) -> String? {
-        found(app.bundle, key, table: table).map { format($0, arguments, locale: app.language) }
+        let value: String
+        if MainBundleProxy.isInstalled(on: app.bundle) {
+            // The patched lookup would ask the download again; the original answers with the app's own text.
+            value = MainBundleProxy.original(app.bundle, key: key, value: Self.sentinel, table: table)
+        } else {
+            value = app.bundle.localizedString(forKey: key, value: Self.sentinel, table: table)
+        }
+        return value == Self.sentinel ? nil : format(value, arguments, locale: app.language)
+    }
+
+    /// The OTA lookup without formatting, for the proxy.
+    func ota(raw key: String, snapshot: Snapshot, id: String, locales: [String]) -> String? {
+        for locale in locales {
+            if let lproj = snapshot.otaBundle(id: id, locale: locale), let value = found(lproj, key, table: nil) { return value }
+        }
+        return nil
     }
 
     private func found(_ bundle: Bundle, _ key: String, table: String?) -> String? {
