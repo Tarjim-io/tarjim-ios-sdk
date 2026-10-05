@@ -5,6 +5,8 @@ enum StoreError: Error, Equatable {
     /// A checksum, hash, file type, bundle id or locale that is not safe as a path component.
     case unsafeName(String)
     case hashMismatch
+    /// `activate` or `setPending` was given an install whose directory is not on disk.
+    case missingInstall(String)
 }
 
 enum StoreIdentifier {
