@@ -47,6 +47,12 @@ struct StoreState: Codable, Equatable, Sendable {
     var badChecksums: Set<String> = []
     var languageOverride: String?
     var deliveredReports: Set<String> = []
+    /// Seconds from `lastCheck` until `meta` is due again: `pollAfter`, a backoff, or a `Retry-After`.
+    var checkInterval: Int?
+    /// The ETag of the last `meta` 200, sent back as `If-None-Match`.
+    var metaETag: String?
+    /// The raw `meta` naming the newest install, kept for its signature (§6.2 step A, owed retries).
+    var heldMeta: Data?
 
     init(sdkVersion: String) {
         self.sdkVersion = sdkVersion
@@ -70,6 +76,9 @@ struct StoreState: Codable, Equatable, Sendable {
         badChecksums = try c.decodeIfPresent(Set<String>.self, forKey: .badChecksums) ?? []
         languageOverride = try c.decodeIfPresent(String.self, forKey: .languageOverride)
         deliveredReports = try c.decodeIfPresent(Set<String>.self, forKey: .deliveredReports) ?? []
+        checkInterval = try c.decodeIfPresent(Int.self, forKey: .checkInterval)
+        metaETag = try c.decodeIfPresent(String.self, forKey: .metaETag)
+        heldMeta = try c.decodeIfPresent(Data.self, forKey: .heldMeta)
     }
 
     func isCheckDue(now: Date, pollAfter: Int) -> Bool {
