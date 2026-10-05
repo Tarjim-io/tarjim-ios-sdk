@@ -151,7 +151,7 @@ final class LaunchCrashRevertTests: XCTestCase {
         XCTAssertEqual(process.string("app.title"), "Tarjim", "reverted")
         let state = await process.state
         XCTAssertTrue(state.badChecksums.contains(two.checksum))
-        XCTAssertNil(state.probation)
+        XCTAssertEqual(state.probation, state.active?.directory, "the release reverted to is watched in turn")
         XCTAssertEqual(state.launchCrashCount, 0)
 
         try process.relaunch()
