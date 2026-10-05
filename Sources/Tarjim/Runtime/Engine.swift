@@ -63,6 +63,8 @@ actor Engine {
     private var launchedInBackground = false
     private var foregroundLaunchCounted = false
     private var foregroundSeconds: TimeInterval = 0
+    /// The checksum of the release the last foreground launch reverted, if any.
+    private(set) var revertedChecksum: String?
     private var exclusiveBusy = false
     private var exclusiveWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -221,6 +223,7 @@ actor Engine {
     private func foregroundLaunchSteps() async {
         let store = environment.store
         var reverted = false
+        var revertedChecksum: String?
         try? await store.update { state in
             guard let probation = state.probation else { return }
             // Probation naming anything but the active install is stale; nothing to blame.
@@ -232,6 +235,7 @@ actor Engine {
             state.launchCrashCount += 1
             guard state.launchCrashCount >= 2, let active = state.active else { return }
             reverted = true
+            revertedChecksum = active.checksum
             state.badChecksums.insert(active.checksum)
             if let previous = state.previous, !state.badChecksums.contains(previous.checksum),
                Engine.isDirectory(store.url(of: previous)) {
@@ -246,6 +250,7 @@ actor Engine {
             state.launchCrashCount = 0
         }
         foregroundSeconds = 0
+        if let revertedChecksum { self.revertedChecksum = revertedChecksum }
         if !reverted, let pending = await store.state.pending {
             _ = await activate(pending)
         }
