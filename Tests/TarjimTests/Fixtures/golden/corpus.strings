@@ -1,0 +1,8 @@
+"greeting" = "Hello";
+"weird\"key" = "value6";
+"quote" = "She said \"hi\"";
+"menu.0" = "Home";
+"menu.1" = "About";
+"multiline" = "Line1\nLine2";
+"trailing" = "ends with \\";
+"unicode" = "مرحبا 🎉";

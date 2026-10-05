@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>cart.items</key>
+  <dict>
+    <key>NSStringLocalizedFormatKey</key><string>%#@v@</string>
+    <key>v</key>
+    <dict>
+      <key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+      <key>NSStringFormatValueTypeKey</key><string>d</string>
+      <key>one</key><string>%d item</string>
+      <key>other</key><string>%d items</string>
+    </dict>
+  </dict>
+  <key>guest.room</key>
+  <dict>
+    <key>NSStringLocalizedFormatKey</key><string>%2$#@v@</string>
+    <key>v</key>
+    <dict>
+      <key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+      <key>NSStringFormatValueTypeKey</key><string>d</string>
+      <key>one</key><string>%1$@ has %2$d guest</string>
+      <key>other</key><string>%1$@ has %2$d guests</string>
+    </dict>
+  </dict>
+  <key>unread.count</key>
+  <dict>
+    <key>NSStringLocalizedFormatKey</key><string>%#@v@</string>
+    <key>v</key>
+    <dict>
+      <key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+      <key>NSStringFormatValueTypeKey</key><string>d</string>
+      <key>one</key><string>one unread</string>
+      <key>other</key><string>many unread</string>
+    </dict>
+  </dict>
+  <key>basket.total</key>
+  <dict>
+    <key>NSStringLocalizedFormatKey</key><string>%#@v@</string>
+    <key>v</key>
+    <dict>
+      <key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+      <key>NSStringFormatValueTypeKey</key><string>d</string>
+      <key>one</key><string>%d item &amp; &lt;one&gt;</string>
+      <key>other</key><string>%d items &amp; &lt;more&gt;</string>
+    </dict>
+  </dict>
+  <key>friend.count</key>
+  <dict>
+    <key>NSStringLocalizedFormatKey</key><string>%#@v@</string>
+    <key>v</key>
+    <dict>
+      <key>NSStringFormatSpecTypeKey</key><string>NSStringPluralRuleType</string>
+      <key>NSStringFormatValueTypeKey</key><string>d</string>
+      <key>one</key><string>%d صديق</string>
+      <key>other</key><string>%d أصدقاء</string>
+    </dict>
+  </dict>
+</dict>
+</plist>

@@ -1,0 +1,25 @@
+# Fixtures
+
+Server answers the tests replay. Nothing here is fetched at test time.
+
+- `release-1/` holds one complete release: `meta.cdn.json` and `meta.origin.json` (the two delivery
+  modes), `manifest.json` (the raw manifest bytes) and `objects/<sha256>.<fileType>` (every object the
+  manifest lists, as decoded bytes).
+- `errors/` holds the answers the SDK has to handle, one envelope per file.
+- `golden/` holds the server writer's own corpus files for `.strings` and `.stringsdict`, verbatim.
+
+An envelope is `{provenance, status, headers, body}`; `body` is the response body as a string, or null.
+
+## Provenance
+
+`release-1` and `errors` are HAND-BUILT from the server's renderer output and documented response
+shapes. The `.strings` and `.stringsdict` objects are renderer output; the `json` objects are
+hand-built (the SDK never fetches them). They are to be replaced by recordings made with
+`scripts/capture-fixtures.sh` once a stage-bound key is available.
+
+Bodies are stored decoded, so object hashes are those of the decoded bytes.
+
+## Before committing a recording
+
+Run `testNoFixtureCarriesAKeyASignatureOrARealHost`. If it flags a recording, capture again from another
+project; never edit the recording, because any edit breaks the hashes.

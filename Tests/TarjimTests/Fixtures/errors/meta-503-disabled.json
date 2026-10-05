@@ -1,0 +1,8 @@
+{
+  "provenance": "hand-built",
+  "status": 503,
+  "headers": {
+    "Content-Type": "application/problem+json; charset=utf-8"
+  },
+  "body": "{\"type\":\"https://api.tarjim.io/problems/delivery.disabled\",\"title\":\"Service Unavailable\",\"status\":503,\"detail\":\"Delivery is disabled for this project.\",\"code\":\"delivery.disabled\"}"
+}

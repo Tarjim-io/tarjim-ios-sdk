@@ -1,0 +1,8 @@
+{
+  "provenance": "hand-built",
+  "status": 401,
+  "headers": {
+    "Content-Type": "application/problem+json; charset=utf-8"
+  },
+  "body": "{\"type\":\"https://api.tarjim.io/problems/unauthorized\",\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"Missing or invalid API key.\",\"code\":\"unauthorized\"}"
+}
