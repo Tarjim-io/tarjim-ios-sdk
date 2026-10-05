@@ -63,6 +63,8 @@ actor Engine {
     private var launchedInBackground = false
     private var foregroundLaunchCounted = false
     private var foregroundSeconds: TimeInterval = 0
+    private var exclusiveBusy = false
+    private var exclusiveWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(_ environment: EngineEnvironment) {
         self.environment = environment
@@ -103,7 +105,7 @@ actor Engine {
     func selectionChanged() async {
         await launchTask?.value
         await refreshOverride()
-        await rebuildSnapshot()
+        await exclusive { await rebuildSnapshot() }
         let state = await environment.store.state
         guard let active = state.active, let selection = environment.snapshots.current.selection,
               !holds(active, locales: selection.locales, bundleIds: bundleIds(of: active)) else { return }
@@ -117,8 +119,10 @@ actor Engine {
         await launchTask?.value
         guard launchedInBackground, !foregroundLaunchCounted else { return }
         foregroundLaunchCounted = true
-        await foregroundLaunchSteps()
-        await rebuildSnapshot()
+        await exclusive {
+            await foregroundLaunchSteps()
+            await rebuildSnapshot()
+        }
     }
 
     /// Foreground time accumulated in this process.
@@ -142,8 +146,10 @@ actor Engine {
 
     func activatePendingUpdate() async -> Bool {
         await launchTask?.value
-        guard let pending = await environment.store.state.pending else { return false }
-        return await activate(pending)
+        return await exclusive {
+            guard let pending = await environment.store.state.pending else { return false }
+            return await activate(pending)
+        }
     }
 
     nonisolated func updates() -> AsyncStream<TarjimUpdate> {
@@ -161,13 +167,31 @@ actor Engine {
 
     // MARK: Activation
 
+    /// Activation, revert and the snapshot swap that follows them run one at a time, so none interleaves with another.
+    private func exclusive<T>(_ body: () async -> T) async -> T {
+        if exclusiveBusy {
+            await withCheckedContinuation { exclusiveWaiters.append($0) }
+        } else {
+            exclusiveBusy = true
+        }
+        let result = await body()
+        if exclusiveWaiters.isEmpty {
+            exclusiveBusy = false
+        } else {
+            exclusiveWaiters.removeFirst().resume()
+        }
+        return result
+    }
+
     private func performLaunch(foreground: Bool) async {
         await refreshOverride()
-        if foreground {
-            foregroundLaunchCounted = true
-            await foregroundLaunchSteps()
+        await exclusive {
+            if foreground {
+                foregroundLaunchCounted = true
+                await foregroundLaunchSteps()
+            }
+            await rebuildSnapshot()
         }
-        await rebuildSnapshot()
     }
 
     private func activate(_ install: InstallRecord) async -> Bool {
@@ -227,7 +251,9 @@ actor Engine {
     private func handle(_ report: CycleReport, knownChecksum: String?) async {
         guard case .installed(let install) = report.outcome else { return }
         if install.checksum != knownChecksum { box.send(.downloaded) }
-        if servesNothing() { _ = await activate(install) }
+        await exclusive {
+            if servesNothing() { _ = await activate(install) }
+        }
     }
 
     /// True when the current snapshot gives the user nothing from the active install.
@@ -241,31 +267,28 @@ actor Engine {
 
     private func rebuildSnapshot() async {
         let store = environment.store
-        // A write that lands while the files are read would leave the snapshot behind the state; read again.
-        for _ in 0..<5 {
-            guard let active = await store.state.active else {
-                environment.snapshots.replace(.empty)
-                return
-            }
-            guard let manifest = readManifest(of: active) else {
-                try? await store.update { state in
-                    guard state.active?.directory == active.directory else { return }
-                    state.active = nil
-                    state.probation = nil
-                    state.launchCrashCount = 0
-                }
-                continue
-            }
-            let entries = manifest.bundles.map { ManifestBundle(id: $0.key, type: $0.value.type, name: $0.value.name) }
-                .sorted { $0.id < $1.id }
-            let selection = LocaleSelector.select(
-                available: Engine.locales(of: manifest), preferences: environment.preferences(),
-                appLanguage: environment.appLanguage(), override: box.override,
-                fallbackLanguage: environment.fallbackLanguage)
-            environment.snapshots.replace(Snapshot(installDirectory: store.url(of: active), entries: entries, selection: selection))
-            await store.protect(active)
-            if await store.state.active?.directory == active.directory { return }
+        guard let active = await store.state.active else {
+            environment.snapshots.replace(.empty)
+            return
         }
+        guard let manifest = readManifest(of: active) else {
+            // The next check installs the release again; its files are reused by hash.
+            try? await store.update { state in
+                state.active = nil
+                state.probation = nil
+                state.launchCrashCount = 0
+            }
+            environment.snapshots.replace(.empty)
+            return
+        }
+        let entries = manifest.bundles.map { ManifestBundle(id: $0.key, type: $0.value.type, name: $0.value.name) }
+            .sorted { $0.id < $1.id }
+        let selection = LocaleSelector.select(
+            available: Engine.locales(of: manifest), preferences: environment.preferences(),
+            appLanguage: environment.appLanguage(), override: box.override,
+            fallbackLanguage: environment.fallbackLanguage)
+        environment.snapshots.replace(Snapshot(installDirectory: store.url(of: active), entries: entries, selection: selection))
+        await store.protect(active)
     }
 
     private func refreshOverride() async {
