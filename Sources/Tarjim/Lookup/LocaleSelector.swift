@@ -86,7 +86,10 @@ extension LocaleSelector {
         while !remaining.isEmpty {
             let answer = Bundle.preferredLocalizations(from: remaining, forPreferences: [preference])
             guard let first = answer.first else { return [] }
-            if sameLanguageAndScript(first, preference, likelySubtags: likelySubtags) { return answer }
+            if sameLanguageAndScript(first, preference, likelySubtags: likelySubtags) {
+                // One script per answer: `sr-ME` is Latin, so Apple's trailing `sr` (Cyrillic) is dropped.
+                return answer.filter { sameLanguageAndScript($0, first, likelySubtags: likelySubtags) }
+            }
             remaining.removeAll { $0 == first }
         }
         return []
