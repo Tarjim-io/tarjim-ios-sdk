@@ -57,6 +57,9 @@ struct StoreState: Codable, Equatable, Sendable {
     var probation: String?
     /// A random identifier for this install, created on first start when the app allows sending it.
     var installIdentifier: String?
+    /// Rejected checksum to the report identity of why, kept so a report handler added in a later app version still
+    /// hears a release that stays rejected.
+    var rejectionReports: [String: String] = [:]
 
     init(sdkVersion: String) {
         self.sdkVersion = sdkVersion
@@ -85,6 +88,7 @@ struct StoreState: Codable, Equatable, Sendable {
         heldMeta = try c.decodeIfPresent(Data.self, forKey: .heldMeta)
         probation = try c.decodeIfPresent(String.self, forKey: .probation)
         installIdentifier = try c.decodeIfPresent(String.self, forKey: .installIdentifier)
+        rejectionReports = try c.decodeIfPresent([String: String].self, forKey: .rejectionReports) ?? [:]
     }
 
     func isCheckDue(now: Date, pollAfter: Int) -> Bool {
