@@ -9,6 +9,19 @@ final class LaterSwapBundle: Bundle, @unchecked Sendable {
     }
 }
 
+/// An earlier patch counting the attributed lookup, which Swift does not expose to override.
+final class AttributedCountingBundle: Bundle, @unchecked Sendable {
+    nonisolated(unsafe) static var lookups = 0
+    private static let lock = NSLock()
+    static func reset() { lock.withLock { lookups = 0 } }
+    static var count: Int { lock.withLock { lookups } }
+
+    override func __localizedAttributedString(forKey key: String, value: String?, table tableName: String?) -> NSAttributedString {
+        Self.lock.withLock { Self.lookups += 1 }
+        return super.__localizedAttributedString(forKey: key, value: value, table: tableName)
+    }
+}
+
 /// The proxy's edges: the same answers as `Tarjim.string`, Apple's formatting kept, other patches respected.
 final class MainBundleProxyEdgeTests: XCTestCase {
     private func patched(_ selection: LocaleSelection, extra: [String: String] = [:],
@@ -121,5 +134,21 @@ final class MainBundleProxyEdgeTests: XCTestCase {
         XCTAssertEqual(CountingBundle.count, 1)
         XCTAssertEqual(bundle.localizedString(forKey: "nowhere", value: nil, table: nil), "nowhere")
         XCTAssertEqual(CountingBundle.count, 2)
+    }
+
+    /// The attributed lookup of a fallback user reaches the app's own lookup exactly once, hit or miss.
+    func testAFallbackAttributedLookupAsksTheAppOnce() throws {
+        let bundle = try LookupFixtures.appBundle(for: self)
+        object_setClass(bundle, AttributedCountingBundle.self)
+        AttributedCountingBundle.reset()
+        let resolver = LookupFixtures.resolver(app: AppResources(bundle: bundle, language: "en"), install: try LookupFixtures.install(for: self),
+                                               selection: LocaleSelection(kind: .fallback, locales: ["ar"]))
+        XCTAssertTrue(MainBundleProxy.install(on: bundle) { key, table in resolver.downloaded(key, table: table) })
+        XCTAssertEqual(attributed(bundle, "app.only").string, "From the app")
+        XCTAssertEqual(AttributedCountingBundle.count, 1)
+        XCTAssertEqual(attributed(bundle, "nowhere").string, "nowhere")
+        XCTAssertEqual(AttributedCountingBundle.count, 2)
+        XCTAssertEqual(attributed(bundle, "app.title").string, "ترجم")
+        XCTAssertEqual(AttributedCountingBundle.count, 3)
     }
 }
