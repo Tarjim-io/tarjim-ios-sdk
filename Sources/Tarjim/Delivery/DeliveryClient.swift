@@ -37,9 +37,9 @@ struct DeliveryClient: Sendable {
             return .notModified
         case 429:
             return .throttled(retryAfter: retryAfter)
-        case 400..<500:
+        case 400, 401, 403, 404:
             let problem = try? JSONDecoder().decode(Problem.self, from: data)
-            if response.statusCode == 404, problem?.code == "delivery.stage_unreleased" {
+            if response.statusCode == 404, let code = problem?.code, Self.unreleasedCodes.contains(code) {
                 return .unreleased(pollAfter: problem?.pollAfter)
             }
             return .configurationError(code: problem?.code ?? "unknown", pollAfter: problem?.pollAfter)
@@ -49,13 +49,13 @@ struct DeliveryClient: Sendable {
     }
 
     func fetchManifest(_ meta: Meta) async -> ManifestOutcome {
-        guard let url = url(for: meta.manifestUrl, meta: meta) else { return .unfetchable(status: 0, retryAfter: nil) }
+        guard let url = url(for: meta.manifestUrl, meta: meta) else { return .refused }
         switch await get(url, withKey: meta.authenticated) {
         case let .body(bytes):
             guard Verifier.matches(bytes, sha256Hex: meta.checksum) else { return .checksumMismatch }
             guard let manifest = try? JSONDecoder().decode(Manifest.self, from: bytes) else { return .unreadable }
             return .verified(manifest, raw: bytes)
-        case let .unfetchable(status): return .unfetchable(status: status, retryAfter: nil)
+        case let .unfetchable(status, seconds): return .unfetchable(status: status, retryAfter: seconds)
         case let .throttled(seconds): return .throttled(retryAfter: seconds)
         case let .serverError(seconds): return .serverError(retryAfter: seconds)
         case .networkFailure: return .networkFailure
@@ -67,12 +67,12 @@ struct DeliveryClient: Sendable {
         guard hash.count == 64, hash.allSatisfy({ $0.isASCII && ($0.isNumber || ("a"..."f").contains($0)) }),
               !fileType.isEmpty, fileType.allSatisfy({ $0.isASCII && $0.isLowercase && $0.isLetter }),
               let url = url(for: meta.slicesBaseUrl + hash + "." + fileType, meta: meta)
-        else { return .unfetchable(status: 0, retryAfter: nil) }
+        else { return .refused }
         switch await get(url, withKey: meta.authenticated) {
         case let .body(bytes):
             if let expectedSize, bytes.count > expectedSize { return .tooLarge }
             return Verifier.matches(bytes, sha256Hex: hash) ? .verified(bytes) : .hashMismatch
-        case let .unfetchable(status): return .unfetchable(status: status, retryAfter: nil)
+        case let .unfetchable(status, seconds): return .unfetchable(status: status, retryAfter: seconds)
         case let .throttled(seconds): return .throttled(retryAfter: seconds)
         case let .serverError(seconds): return .serverError(retryAfter: seconds)
         case .networkFailure: return .networkFailure
@@ -81,38 +81,67 @@ struct DeliveryClient: Sendable {
 
     // MARK: private
 
+    private static let unreleasedCodes: Set<String> = ["delivery.stage_unreleased", "delivery.track_unreleased", "delivery.not_published"]
+
+    /// RFC 3986 query characters; anything else, whitespace and `#` included, would not survive the join.
+    private static let queryCharacters = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$&'()*+,;=:@/?%")
+
     private struct Problem: Decodable {
         var code: String?
         var pollAfter: Int?
+
+        private enum CodingKeys: String, CodingKey { case code, pollAfter }
+
+        // Each member is read on its own so a malformed `pollAfter` does not lose the `code`.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            code = try? c.decodeIfPresent(String.self, forKey: .code)
+            pollAfter = try? c.decodeIfPresent(Int.self, forKey: .pollAfter)
+        }
     }
 
     private enum Fetched {
         case body(Data)
-        case unfetchable(Int)
+        case unfetchable(Int, retryAfter: Int?)
         case throttled(Int?)
         case serverError(Int?)
         case networkFailure
     }
 
+    /// The identity travels with the key only: a CDN request carries none of it.
     private func applyIdentity(to request: inout URLRequest, withKey: Bool) {
-        if withKey {
-            request.setValue(endpoint.apiKey, forHTTPHeaderField: "X-Tarjim-Apikey")
-            request.setValue(apiVersion, forHTTPHeaderField: "X-Tarjim-Api-Version")
-        }
+        guard withKey else { return }
+        request.setValue(endpoint.apiKey, forHTTPHeaderField: "X-Tarjim-Apikey")
+        request.setValue(apiVersion, forHTTPHeaderField: "X-Tarjim-Api-Version")
         request.setValue(identity.userAgent, forHTTPHeaderField: "User-Agent")
     }
 
-    /// `nil` when the reference is not safe to request. In origin mode the key travels with the
-    /// request, so a reference that could leave the meta URL's host or directory is refused.
+    /// `nil` when the reference must not be requested.
     private func url(for reference: String, meta: Meta) -> URL? {
-        guard meta.authenticated else {
-            let query = meta.signedQuery.map { "?" + $0 } ?? ""
-            return URL(string: reference + query)
-        }
+        meta.authenticated ? originURL(reference) : cdnURL(reference, signedQuery: meta.signedQuery)
+    }
+
+    /// Origin references are path-relative; one that could leave the meta URL's host would take the
+    /// key with it.
+    private func originURL(_ reference: String) -> URL? {
         guard !reference.hasPrefix("/"), !reference.contains(".."),
-              let parts = URLComponents(string: reference), parts.scheme == nil, parts.host == nil
+              let parts = URLComponents(string: reference), parts.scheme == nil, parts.host == nil,
+              let resolved = URL(string: reference, relativeTo: endpoint.metaURL)?.absoluteURL,
+              resolved.scheme == endpoint.metaURL.scheme, resolved.host == endpoint.metaURL.host, resolved.port == endpoint.metaURL.port
         else { return nil }
-        return URL(string: reference, relativeTo: endpoint.metaURL)?.absoluteURL
+        return resolved
+    }
+
+    /// CDN URLs are joined verbatim; whatever would not survive that unchanged is refused.
+    private func cdnURL(_ base: String, signedQuery: String?) -> URL? {
+        guard base.hasPrefix("https://"), !base.contains("?"), !base.contains("#") else { return nil }
+        var joined = base
+        if let signedQuery, !signedQuery.isEmpty {
+            guard signedQuery.allSatisfy(Self.queryCharacters.contains) else { return nil }
+            joined += "?" + signedQuery
+        }
+        guard let url = URL(string: joined), url.absoluteString == joined else { return nil }
+        return url
     }
 
     private func get(_ url: URL, withKey: Bool) async -> Fetched {
@@ -125,21 +154,31 @@ struct DeliveryClient: Sendable {
         } catch {
             return .networkFailure
         }
+        let retryAfter = Self.retryAfter(response)
         switch response.statusCode {
         case 200: return .body(data)
-        case 403, 404, 503: return .unfetchable(response.statusCode)
-        case 429: return .throttled(Self.retryAfter(response))
-        default: return .serverError(Self.retryAfter(response))
+        case 429: return .throttled(retryAfter)
+        case 400..<500, 503: return .unfetchable(response.statusCode, retryAfter: retryAfter)
+        default: return .serverError(retryAfter)
         }
     }
 
     /// Only the delta-seconds form; an HTTP date is ignored.
     private static func retryAfter(_ response: HTTPURLResponse) -> Int? {
-        response.value(forHTTPHeaderField: "Retry-After").flatMap { Int($0) }.flatMap { $0 >= 0 ? $0 : nil }
+        guard let value = response.value(forHTTPHeaderField: "Retry-After"),
+              let seconds = Int(value.trimmingCharacters(in: .whitespaces)), seconds >= 0
+        else { return nil }
+        return seconds
     }
 }
 
 extension DeliveryClient: CustomStringConvertible, CustomDebugStringConvertible {
     var description: String { "DeliveryClient(endpoint: \(endpoint), apiVersion: \(apiVersion))" }
     var debugDescription: String { description }
+}
+
+extension DeliveryClient: CustomReflectable {
+    var customMirror: Mirror {
+        Mirror(self, children: ["endpoint": endpoint, "identity": identity, "apiVersion": apiVersion], displayStyle: .struct)
+    }
 }
