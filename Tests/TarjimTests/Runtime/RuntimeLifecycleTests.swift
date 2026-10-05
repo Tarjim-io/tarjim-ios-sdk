@@ -96,6 +96,42 @@ final class RuntimeLifecycleTests: XCTestCase {
         let kinds = harness.reports.value.map { "\($0.kind)" }
         XCTAssertEqual(kinds.count, Set(kinds).count, "each condition once: \(kinds)")
     }
+
+    /// An install shown mid-session (a first download, a language switch, `activatePendingUpdate`) is proven by staying in
+    /// the foreground in that same session.
+    func testAMidSessionActivationIsProvenInThatSession() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.server.answerMeta(FakeTransport.Answer(status: 503))
+        harness.instantSleeps.value = 2
+        let runtime = try harness.make()
+        await runtime.start(foreground: true)
+        await runtime.becameActive()
+        await EngineFixtures.settle()
+        harness.server.publish(try Release.one())
+        harness.clock.advance(86_400)
+        harness.instantSleeps.value = harness.sleeps.value.count + 1
+        await runtime.checkNow()
+        await EngineFixtures.settle()
+        let identifier = StoreIdentifier.make(host: DeliveryFixtures.host, projectId: DeliveryFixtures.projectId, apiKey: DeliveryFixtures.apiKey)
+        let state = await (try StoreFixtures.store(harness.root, identifier: identifier)).state
+        XCTAssertNotNil(state.active)
+        XCTAssertNil(state.probation, "the app stayed active long enough after the activation")
+        await runtime.resignedActive()
+    }
+
+    /// Becoming active before `start` has finished still leads to a prompt first check, not one an hour later.
+    func testBecomingActiveBeforeStartStillChecksPromptly() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.server.publish(try Release.one())
+        harness.instantSleeps.value = 3
+        let runtime = try harness.make()
+        await runtime.becameActive()
+        await runtime.start(foreground: true)
+        await EngineFixtures.settle()
+        XCTAssertEqual(harness.server.metaRequests.count, 1)
+        XCTAssertFalse(harness.sleeps.value.contains(3600), "\(harness.sleeps.value)")
+        await runtime.resignedActive()
+    }
 }
 
 final class ReporterEdgeTests: XCTestCase {
