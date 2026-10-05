@@ -41,10 +41,25 @@ enum CycleOutcome: Equatable, Sendable {
     case failed
 }
 
+/// What a cycle observed besides its outcome; reports are derived from these.
+enum CycleSignal: Equatable, Sendable {
+    /// `meta` answered 200 or 304.
+    case metaAnswered
+    /// The manifest's bytes did not hash to the checksum `meta` named.
+    case manifestChecksumMismatch(metaChecksum: String)
+    /// A downloaded file did not hash to the hash the manifest listed.
+    case fileHashMismatch(hash: String)
+    /// The owed slots' hashes of the newest install known when the cycle ended.
+    case owed(hashes: Set<String>)
+    /// A new install was built from a manifest of this schema version.
+    case installed(schemaVersion: Int, hasStrings: Bool, checksum: String)
+}
+
 struct CycleReport: Equatable, Sendable {
     let outcome: CycleOutcome
     /// When to run again, jitter included.
     let nextCheckIn: TimeInterval
+    var signals: [CycleSignal] = []
 }
 
 /// The update cycle. Records what it builds as pending; activation is not its job.
