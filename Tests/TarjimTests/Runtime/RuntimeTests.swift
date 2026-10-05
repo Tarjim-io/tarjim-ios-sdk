@@ -12,6 +12,9 @@ final class RuntimeHarness {
     let sleeps = TestValue<[TimeInterval]>([])
     /// Waits that return at once; after these, a wait lasts until its task is cancelled (as a real timer would).
     let instantSleeps = TestValue<Int>(1_000)
+    /// Ends every wait still blocked (a timer that was never cancelled would then run on).
+    let releaseBlockedSleeps = TestValue<Bool>(false)
+    let appLanguage = TestValue<String>("en")
 
     init(_ test: XCTestCase) throws {
         root = try StoreFixtures.root(for: test)
@@ -29,12 +32,15 @@ final class RuntimeHarness {
 
     func make(_ configuration: TarjimConfiguration? = nil) throws -> Runtime {
         let clock = self.clock, sleeps = self.sleeps, instantSleeps = self.instantSleeps
+        let release = self.releaseBlockedSleeps, appLanguage = self.appLanguage
         let environment = Runtime.Environment(root: root, transport: server, appBundle: appBundle,
-                                              preferences: { ["en-US"] }, appLanguage: { "en" }, now: { clock.now },
+                                              preferences: { ["en-US"] }, appLanguage: { appLanguage.value }, now: { clock.now },
                                               random: { 0 }, sleep: { seconds in
                                                   sleeps.value.append(seconds)
                                                   if sleeps.value.count > instantSleeps.value {
-                                                      try? await Task.sleep(nanoseconds: 3_600_000_000_000)
+                                                      while !Task.isCancelled, !release.value {
+                                                          try? await Task.sleep(nanoseconds: 1_000_000)
+                                                      }
                                                   }
                                               },
                                               sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4")
