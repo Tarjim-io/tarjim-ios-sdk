@@ -86,7 +86,9 @@ final class LocaleRulesTests: XCTestCase {
     func testTheScriptTableAgreesWithApple() {
         let corpus = ["zh", "zh-CN", "zh-TW", "zh-HK", "zh-MO", "zh-SG", "zh-Hant", "zh-Hans-HK", "yue", "yue-CN", "sr", "sr-RS", "sr-ME",
                       "sr-Latn", "sr-Cyrl-ME", "uz", "uz-AF", "pa", "pa-PK", "az", "az-IR", "mn", "bs", "ms", "ha", "ks", "sd", "ug",
-                      "kk", "ky", "tg", "ar", "en", "en-GB", "ru", "he", "iw", "ja", "ko", "el", "hi", "th", "fil", "tl", "no", "nb", "mo"]
+                      "kk", "ky", "tg", "ar", "en", "en-GB", "ru", "he", "iw", "ja", "ko", "el", "hi", "th", "fil", "tl", "no", "nb", "mo",
+                      "ku", "ku-IQ", "ff", "lb", "rm", "fo", "vai", "shi", "ha-SD", "ms-CC", "kk-CN", "ky-CN", "tg-PK", "mn-CN",
+                      "uz-CN", "sd-IN", "pa-IN", "az-AZ", "zh-Hant-CN", "sr-Latn-RS", "bs-Cyrl"]
         for identifier in corpus {
             let canonical = Locale.canonicalLanguageIdentifier(from: identifier)
             let apple = Locale.Language(identifier: Locale.Language(identifier: canonical).maximalIdentifier).script?.identifier
