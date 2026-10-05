@@ -52,6 +52,26 @@ struct StoreState: Codable, Equatable, Sendable {
         self.sdkVersion = sdkVersion
     }
 
+    /// Every field is optional on disk: another SDK version may have written fewer or more of them.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try c.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 0
+        sdkVersion = try c.decodeIfPresent(String.self, forKey: .sdkVersion) ?? ""
+        nextInstallNumber = try c.decodeIfPresent(Int.self, forKey: .nextInstallNumber) ?? 1
+        lastCheck = try c.decodeIfPresent(Date.self, forKey: .lastCheck)
+        lastPollAfter = try c.decodeIfPresent(Int.self, forKey: .lastPollAfter)
+        backoffStep = try c.decodeIfPresent(Int.self, forKey: .backoffStep) ?? 0
+        active = try c.decodeIfPresent(InstallRecord.self, forKey: .active)
+        previous = try c.decodeIfPresent(InstallRecord.self, forKey: .previous)
+        pending = try c.decodeIfPresent(InstallRecord.self, forKey: .pending)
+        stagingChecksum = try c.decodeIfPresent(String.self, forKey: .stagingChecksum)
+        launchCrashCount = try c.decodeIfPresent(Int.self, forKey: .launchCrashCount) ?? 0
+        rejectedChecksums = try c.decodeIfPresent(Set<String>.self, forKey: .rejectedChecksums) ?? []
+        badChecksums = try c.decodeIfPresent(Set<String>.self, forKey: .badChecksums) ?? []
+        languageOverride = try c.decodeIfPresent(String.self, forKey: .languageOverride)
+        deliveredReports = try c.decodeIfPresent(Set<String>.self, forKey: .deliveredReports) ?? []
+    }
+
     func isCheckDue(now: Date, pollAfter: Int) -> Bool {
         guard let lastCheck else { return true }
         // A clock moved back must not stall polling until the old time comes round again.
