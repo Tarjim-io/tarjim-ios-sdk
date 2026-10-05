@@ -13,6 +13,7 @@ final class DeliveryEndpointTests: XCTestCase {
         let endpoint = try DeliveryEndpoint(host: URL(string: "http://localhost:8080")!, projectId: 7, apiKey: "k")
         XCTAssertEqual(endpoint.metaURL.absoluteString, "http://localhost:8080/projects/7/delivery/meta")
         XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "http://127.0.0.1:3000")!, projectId: 7, apiKey: "k"))
+        XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "http://[::1]:3000")!, projectId: 7, apiKey: "k"))
         XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "https://api.example.invalid:8443")!, projectId: 7, apiKey: "k"))
     }
 
