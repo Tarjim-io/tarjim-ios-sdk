@@ -48,8 +48,8 @@ actor Store {
     nonisolated let directory: URL
     private(set) var state: StoreState
     private var protectedDirectories: Set<String> = []
-    /// Built but not yet recorded: `cleanup` may run in between. Recording any install supersedes them, so an
-    /// abandoned build is collected by the next cleanup.
+    /// Built but not yet recorded: `cleanup` may run in between. Recording one releases only that one; an
+    /// abandoned build stays until the next launch's cleanup.
     private var unrecordedInstalls: Set<String> = []
 
     init(root: URL, identifier: String, sdkVersion: String) throws {
@@ -369,7 +369,7 @@ actor Store {
         if next.active?.directory != install.directory { next.active = install }
         if next.pending?.directory == install.directory { next.pending = nil }
         try save(next)
-        unrecordedInstalls = []
+        unrecordedInstalls.remove(install.directory)
     }
 
     func setPending(_ install: InstallRecord?) throws {
@@ -377,7 +377,7 @@ actor Store {
         var next = state
         next.pending = install
         try save(next)
-        if install != nil { unrecordedInstalls = [] }
+        if let install { unrecordedInstalls.remove(install.directory) }
     }
 
     /// state.json must always name a complete directory.
