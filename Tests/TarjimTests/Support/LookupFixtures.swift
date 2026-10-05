@@ -11,6 +11,12 @@ enum LookupFixtures {
         ManifestBundle(id: "b3", type: "custom", name: "checkout-screen"),
     ]
 
+    /// How Apple writes `n` in `locale` on this OS: digit systems differ between OS versions (iOS 16 writes `ar` with
+    /// Arabic-Indic digits, macOS 15 with Western ones), and the SDK passes Apple's choice through.
+    static func digits(_ n: Int, _ locale: String) -> String {
+        String(format: "%d", locale: Locale(identifier: locale), n)
+    }
+
     static func temporaryDirectory(for test: XCTestCase) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("tarjim-lookup-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

@@ -22,7 +22,7 @@ jobs:
       - run: swift --version
       - run: swift test --parallel
       # A missing lock only shows up as a data race; plain runs pass by luck.
-      - run: swift test --sanitize=thread --filter SnapshotHolderTests
+      - run: swift test --sanitize=thread --filter "SnapshotHolderTests|ResolverConcurrencyTests"
 
   latest:
     runs-on: macos-26
