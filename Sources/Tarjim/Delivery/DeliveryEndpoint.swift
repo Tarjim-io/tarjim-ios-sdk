@@ -17,6 +17,8 @@ struct DeliveryEndpoint: Sendable, Equatable {
         guard let parts = URLComponents(url: host, resolvingAgainstBaseURL: false),
               let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let name = parts.host, !name.isEmpty,
+              // Plain http would put the key on the wire in the clear.
+              scheme == "https" || ["localhost", "127.0.0.1", "::1"].contains(name.lowercased()),
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
               parts.path.isEmpty || parts.path == "/"
         else { throw Error.invalidHost }
@@ -57,4 +59,10 @@ struct ClientIdentity: Sendable, Equatable {
 extension DeliveryEndpoint: CustomStringConvertible, CustomDebugStringConvertible {
     var description: String { "DeliveryEndpoint(host: \(host.absoluteString), projectId: \(projectId))" }
     var debugDescription: String { description }
+}
+
+extension DeliveryEndpoint: CustomReflectable {
+    var customMirror: Mirror {
+        Mirror(self, children: ["host": host, "projectId": projectId, "metaURL": metaURL], displayStyle: .struct)
+    }
 }
