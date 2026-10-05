@@ -156,6 +156,10 @@ final class Runtime: Sendable {
     func start(foreground: Bool) async {
         guard parts.markStarted() else { return }
         defer { parts.finishStart() }
+        if configuration.interceptsMainBundle {
+            let resolver = resolver
+            MainBundleProxy.install(on: environment.appBundle) { key, table in resolver.downloaded(key, table: table) }
+        }
         let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: environment.appVersion,
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
