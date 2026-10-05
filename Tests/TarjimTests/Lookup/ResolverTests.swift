@@ -5,11 +5,17 @@ import XCTest
 final class ResolverTests: XCTestCase {
     private let arabic = LocaleSelection(kind: .user, locales: ["ar"])
 
+    /// Apple's formatter wraps an argument whose direction differs from the text in U+2068…U+2069 when it is
+    /// given a locale; the SDK passes that through untouched, as `String(localized:)` would.
+    private func isolated(_ text: String) -> String {
+        String(UnicodeScalar(0x2068)!) + text + String(UnicodeScalar(0x2069)!)
+    }
+
     func testADownloadedStringIsServed() throws {
         let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self), install: try LookupFixtures.install(for: self), selection: arabic)
         XCTAssertEqual(resolver.string("app.title"), "ترجم")
         XCTAssertEqual(resolver.string("app.title", bundle: .custom("checkout-screen")), "الدفع")
-        XCTAssertEqual(resolver.string("greeting", arguments: ["Sam"]), "مرحبًا، Sam!")
+        XCTAssertEqual(resolver.string("greeting", arguments: ["Sam"]), "مرحبًا، \(isolated("Sam"))!")
     }
 
     /// The selected locales are read in order; a key missing in the regional file comes from the parent.
@@ -17,7 +23,7 @@ final class ResolverTests: XCTestCase {
         let install = try LookupFixtures.install(for: self, extra: ["ns7.bundle/ar-EG.lproj/Localizable.strings": "\"greeting\" = \"أهلاً يا %@\";"])
         let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self), install: install,
                                                selection: LocaleSelection(kind: .user, locales: ["ar-EG", "ar"]))
-        XCTAssertEqual(resolver.string("greeting", arguments: ["Sam"]), "أهلاً يا Sam")
+        XCTAssertEqual(resolver.string("greeting", arguments: ["Sam"]), "أهلاً يا \(isolated("Sam"))")
         XCTAssertEqual(resolver.string("app.title"), "ترجم")
     }
 
@@ -53,7 +59,7 @@ final class ResolverTests: XCTestCase {
     func testTheDefaultBundleNeverChangesMeaning() throws {
         let install = try LookupFixtures.install(for: self, extra: ["b9.bundle/ar.lproj/Localizable.strings": "\"app.title\" = \"مخصص\";"])
         let app = try LookupFixtures.app(for: self)
-        let grown = LookupFixtures.entries + [BundleEntry(id: "b9", type: "custom", name: "default"), BundleEntry(id: "ns2", type: "namespace", name: "zz")]
+        let grown = LookupFixtures.entries + [ManifestBundle(id: "b9", type: "custom", name: "default"), ManifestBundle(id: "ns2", type: "namespace", name: "zz")]
         let resolver = LookupFixtures.resolver(app: app, install: install, selection: arabic, entries: grown)
         XCTAssertEqual(resolver.string("app.title"), "ترجم")
         XCTAssertEqual(resolver.string("app.title", bundle: .custom("default")), "مخصص")
@@ -101,7 +107,7 @@ final class ResolverTests: XCTestCase {
         let app = try LookupFixtures.app(for: self)
         let install = try LookupFixtures.install(for: self, bundles: ["ns12"], locales: ["ar"])
         let resolver = LookupFixtures.resolver(app: app, install: install, selection: arabic,
-                                               entries: [BundleEntry(id: "ns12", type: "namespace", name: "checkout")])
+                                               entries: [ManifestBundle(id: "ns12", type: "namespace", name: "checkout")])
         XCTAssertEqual(resolver.string("app.title"), "app.title")
         XCTAssertEqual(resolver.string("app.only"), "من التطبيق")
     }
