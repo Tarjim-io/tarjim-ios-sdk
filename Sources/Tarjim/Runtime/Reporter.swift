@@ -107,7 +107,8 @@ actor Reporter {
         for hash in await identities(prefix: "hash:") where !owed.contains(hash) && !fileMismatches.contains(hash) {
             await clear(identity: "hash:\(hash)")
         }
-        for hash in owedRuns.keys where !owed.contains(hash) {
+        // Also what an earlier process delivered: this one never counted it.
+        for hash in Set(owedRuns.keys).union(await identities(prefix: "owed:")) where !owed.contains(hash) {
             owedRuns[hash] = nil
             await clear(identity: "owed:\(hash)")
         }
