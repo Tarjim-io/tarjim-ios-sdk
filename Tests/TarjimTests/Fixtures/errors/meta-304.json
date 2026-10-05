@@ -1,0 +1,9 @@
+{
+  "provenance": "hand-built",
+  "status": 304,
+  "headers": {
+    "ETag": "\"m17-124af669496db873e82b08fb88e8e3671a83029c49825d5d5209b18e14c960e1-p1800\"",
+    "Cache-Control": "private, max-age=60, stale-if-error=60"
+  },
+  "body": null
+}

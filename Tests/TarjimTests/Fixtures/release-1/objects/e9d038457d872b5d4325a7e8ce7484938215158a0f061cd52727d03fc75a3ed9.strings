@@ -1,0 +1,9 @@
+"app.title" = "Tarjim";
+"greeting" = "Hello, %@!";
+"quote" = "She said \"hi\"\nthen left";
+"path.hint" = "C:\\Users\\me";
+"menu.0" = "Home";
+"menu.1" = "About";
+"avatar.image" = "https://cdn.example.com/a.png";
+"discount" = "Save 20% today";
+"files.owner" = "%1$@ has %2$d files";

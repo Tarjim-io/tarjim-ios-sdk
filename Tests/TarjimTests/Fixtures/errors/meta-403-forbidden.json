@@ -1,0 +1,8 @@
+{
+  "provenance": "hand-built",
+  "status": 403,
+  "headers": {
+    "Content-Type": "application/problem+json; charset=utf-8"
+  },
+  "body": "{\"type\":\"https://api.tarjim.io/problems/forbidden\",\"title\":\"Forbidden\",\"status\":403,\"detail\":\"This key may not read the delivery routes.\",\"code\":\"forbidden\"}"
+}

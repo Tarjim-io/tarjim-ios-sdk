@@ -1,0 +1,8 @@
+{
+  "provenance": "hand-built",
+  "status": 400,
+  "headers": {
+    "Content-Type": "application/problem+json; charset=utf-8"
+  },
+  "body": "{\"type\":\"https://api.tarjim.io/problems/validation\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"Unsupported API version.\",\"code\":\"validation\",\"supported\":[\"2026-07-29\"],\"current\":\"2026-07-29\"}"
+}
