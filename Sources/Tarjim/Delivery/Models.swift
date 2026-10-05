@@ -60,9 +60,12 @@ struct Manifest: Decodable, Sendable, Equatable {
         baseLocale = try c.decodeIfPresent(String.self, forKey: .baseLocale)
         let kept = try c.decode([String: Lenient<BundleEntry>].self, forKey: .bundles).compactMapValues(\.value)
         bundles = kept
-        let raw = try c.decode([String: [String: [String: Lenient<SliceEntry>]]].self, forKey: .slices)
+        typealias Files = Lenient<[String: Lenient<SliceEntry>]>
+        let raw = try c.decode([String: Lenient<[String: Files]>].self, forKey: .slices)
         // A bundle that cannot be addressed takes its slices with it.
-        slices = raw.filter { kept[$0.key] != nil }.mapValues { $0.mapValues { $0.compactMapValues(\.value) } }
+        slices = raw.filter { kept[$0.key] != nil }.compactMapValues(\.value).mapValues { locales in
+            locales.compactMapValues(\.value).mapValues { $0.compactMapValues(\.value) }
+        }
     }
 }
 
@@ -78,6 +81,15 @@ struct SliceEntry: Decodable, Sendable, Equatable {
     var size: Int
     /// Advisory; a producer may omit it.
     var transferSize: Int?
+
+    private enum CodingKeys: String, CodingKey { case hash, size, transferSize }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hash = try c.decode(String.self, forKey: .hash)
+        size = try c.decode(Int.self, forKey: .size)
+        transferSize = try? c.decodeIfPresent(Int.self, forKey: .transferSize)
+    }
 }
 
 extension Meta: CustomStringConvertible, CustomDebugStringConvertible {
