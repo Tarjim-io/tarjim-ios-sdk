@@ -7,7 +7,7 @@ public enum TarjimBundle: Hashable, Sendable {
 }
 
 /// One `bundles` entry of a manifest.
-struct BundleEntry: Equatable, Sendable {
+struct ManifestBundle: Equatable, Sendable {
     let id: String
     /// `namespace` or `custom`; any other value never matches.
     let type: String
@@ -15,7 +15,7 @@ struct BundleEntry: Equatable, Sendable {
 }
 
 enum BundleDirectory {
-    static func id(for bundle: TarjimBundle, in entries: [BundleEntry]) -> String? {
+    static func id(for bundle: TarjimBundle, in entries: [ManifestBundle]) -> String? {
         let (type, name) = switch bundle {
         case .namespace(let name): ("namespace", name)
         case .custom(let name): ("custom", name)
