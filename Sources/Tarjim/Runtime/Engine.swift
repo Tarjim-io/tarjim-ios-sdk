@@ -107,6 +107,10 @@ actor Engine {
     }
 
     /// Foreground time accumulated in this process.
+    /// The process came to the foreground. The first time, for a process the system launched in the background, this
+    /// counts as its foreground launch.
+    func enteredForeground() async {}
+
     func foregroundElapsed(_ seconds: TimeInterval) async {
         foregroundSeconds += seconds
         guard foregroundSeconds >= Engine.probationSeconds else { return }

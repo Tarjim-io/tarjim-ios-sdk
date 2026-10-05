@@ -387,6 +387,16 @@ actor Store {
             && name.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 45 || $0 == 95 }
     }
 
+    /// Reads, changes and saves the state in one step: no other write can land in between.
+    func update(_ change: (inout StoreState) throws -> Void) throws {
+        throw StoreError.missingInstall("update")
+    }
+
+    /// Activates and applies `alsoChange` in the same save.
+    func activate(_ install: InstallRecord, alsoChange: (inout StoreState) -> Void) throws {
+        throw StoreError.missingInstall("activate")
+    }
+
     func activate(_ install: InstallRecord) throws {
         try requireOnDisk(install)
         var next = state
