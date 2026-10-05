@@ -48,6 +48,9 @@ actor Store {
     nonisolated let directory: URL
     private(set) var state: StoreState
     private var protectedDirectories: Set<String> = []
+    /// Built but not yet recorded: `cleanup` may run in between. Recording any install supersedes them, so an
+    /// abandoned build is collected by the next cleanup.
+    private var unrecordedInstalls: Set<String> = []
 
     init(root: URL, identifier: String, sdkVersion: String) throws {
         let tarjim = root.appendingPathComponent("Tarjim", isDirectory: true)
@@ -72,7 +75,25 @@ actor Store {
             loaded.rejectedChecksums = []
             loaded.sdkVersion = sdkVersion
         }
-        return loaded
+        return sanitised(loaded)
+    }
+
+    /// state.json is data from disk: its names become path components, so they are checked like server input.
+    private static func sanitised(_ state: StoreState) -> StoreState {
+        var state = state
+        if let checksum = state.stagingChecksum, !isSafe(checksum: checksum) { state.stagingChecksum = nil }
+        if let record = state.active, !isConsistent(record) { state.active = nil }
+        if let record = state.previous, !isConsistent(record) { state.previous = nil }
+        if let record = state.pending, !isConsistent(record) { state.pending = nil }
+        if !(1...maxInstallNumber).contains(state.nextInstallNumber) { state.nextInstallNumber = 1 }
+        return state
+    }
+
+    private static let maxInstallNumber = 1_000_000_000
+
+    private static func isConsistent(_ record: InstallRecord) -> Bool {
+        guard isSafe(checksum: record.checksum), let number = installNumber(record.directory), number > 0 else { return false }
+        return record.directory == "\(number)-\(record.checksum.prefix(8))"
     }
 
     func save(_ state: StoreState) throws {
@@ -125,24 +146,30 @@ actor Store {
     }
 
     func heldObject(hash: String, fileType: String) -> URL? {
-        if let checksum = state.stagingChecksum, Store.isSafe(checksum: checksum) {
-            let staged = stagingDirectory(checksum).appendingPathComponent("\(hash).\(fileType)")
-            if stagedObjects(checksum: checksum).contains(staged.lastPathComponent) { return staged }
-        }
-        return installedFile(hash: hash, fileType: fileType)
+        if let staged = stateStagingCandidate(hash: hash, fileType: fileType) { return staged }
+        return installedCandidates()["\(hash).\(fileType)"]?.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    /// Any install on disk, not just the ones state.json names: a rollback target may be none of them.
-    private func installedFile(hash: String, fileType: String) -> URL? {
+    /// A bad release's leftovers are never a source, even before cleanup has removed them.
+    private func stateStagingCandidate(hash: String, fileType: String) -> URL? {
+        guard let checksum = state.stagingChecksum, Store.isSafe(checksum: checksum),
+              !state.badChecksums.contains(checksum) else { return nil }
+        let name = "\(hash).\(fileType)"
+        return stagedObjects(checksum: checksum).contains(name) ? stagingDirectory(checksum).appendingPathComponent(name) : nil
+    }
+
+    /// `<hash>.<fileType>` to the files of every install on disk that lists it, newest install first. Any install, not
+    /// just the ones state.json names: a rollback target may be none of them.
+    private func installedCandidates() -> [String: [URL]] {
+        var index: [String: [URL]] = [:]
         for name in installDirectoryNames().reversed() {
             guard let manifest = readInstallManifest(named: name), !state.badChecksums.contains(manifest.checksum) else { continue }
-            for (key, fileHash) in manifest.files where fileHash == hash {
-                guard let slot = Store.slot(fromKey: key), slot.fileType == fileType else { continue }
-                let url = fileURL(installNamed: name, slot: slot)
-                if FileManager.default.fileExists(atPath: url.path) { return url }
+            for (key, fileHash) in manifest.files.sorted(by: { $0.key < $1.key }) {
+                guard let slot = Store.slot(fromKey: key) else { continue }
+                index["\(fileHash).\(slot.fileType)", default: []].append(fileURL(installNamed: name, slot: slot))
             }
         }
-        return nil
+        return index
     }
 
     private func installDirectoryNames() -> [String] {
@@ -198,27 +225,31 @@ actor Store {
 
     func makeInstall(_ plan: InstallPlan) throws -> InstallRecord {
         guard Store.isSafe(checksum: plan.checksum) else { throw StoreError.unsafeName(plan.checksum) }
-        let number = nextFreeInstallNumber(checksum: plan.checksum)
+        let number = nextFreeInstallNumber()
         let name = "\(number)-\(plan.checksum.prefix(8))"
         let build = stagingDirectory(plan.checksum).appendingPathComponent("build-\(number)", isDirectory: true)
         let fileManager = FileManager.default
         var owed: Set<Slot> = []
         var written: [String: String] = [:]
+        var claimedPaths: Set<String> = []
         do {
+            // A crash can leave this very directory behind; whatever it holds must not leak into the install.
+            try? fileManager.removeItem(at: build)
             try fileManager.createDirectory(at: build, withIntermediateDirectories: true)
+            let sources = InstallSources(store: self, plan: plan)
             for slot in installableSlots(plan) {
                 guard let hash = plan.listed[slot] else { continue }
                 guard Store.isSafe(hash: hash) else { throw StoreError.unsafeName(hash) }
-                let source = stagingSource(plan, slot: slot, hash: hash)
-                if let source {
-                    let data = try Data(contentsOf: source)
+                // On a case-insensitive volume `EN` and `en` are one file; the first slot keeps it.
+                guard claimedPaths.insert(Store.relativePath(of: slot).lowercased()).inserted else { continue }
+                if let data = sources.verifiedData(hash: hash, fileType: slot.fileType) {
                     try writeFile(data, in: build, slot: slot, baseLocale: plan.baseLocale)
-                    written[Store.key(for: slot)] = Store.sha256Hex(data)
+                    written[Store.key(for: slot)] = hash
                     continue
                 }
                 owed.insert(slot)
-                if let (url, activeHash) = activeFile(for: slot) {
-                    try writeFile(Data(contentsOf: url), in: build, slot: slot, baseLocale: plan.baseLocale)
+                if let (data, activeHash) = sources.activeData(for: slot) {
+                    try writeFile(data, in: build, slot: slot, baseLocale: plan.baseLocale)
                     written[Store.key(for: slot)] = activeHash
                 }
             }
@@ -230,6 +261,7 @@ actor Store {
             try? fileManager.removeItem(at: build)
             throw error
         }
+        unrecordedInstalls.insert(name)
         InstallNumbers.record(number, for: directory)
         var next = state
         next.nextInstallNumber = number + 1
@@ -237,12 +269,13 @@ actor Store {
         return InstallRecord(directory: name, checksum: plan.checksum, releaseId: plan.releaseId, owedSlots: owed)
     }
 
-    /// Never reuses a path this process may have handed out, even if state.json has since gone back.
-    private func nextFreeInstallNumber(checksum: String) -> Int {
-        var number = max(state.nextInstallNumber, InstallNumbers.highest(for: directory) + 1)
-        while FileManager.default.fileExists(atPath: directory.appendingPathComponent("installs/\(number)-\(checksum.prefix(8))").path) {
-            number += 1
-        }
+    /// Above everything this process handed out and everything on disk, so a counter lost to a crash, a rollback or a
+    /// corrupt value never makes a path repeat; and never on a number any install already uses, whatever its checksum.
+    private func nextFreeInstallNumber() -> Int {
+        let counter = (1...Store.maxInstallNumber).contains(state.nextInstallNumber) ? state.nextInstallNumber : 1
+        let used = Set(installDirectoryNames().compactMap(Store.installNumber).map { min($0, Store.maxInstallNumber) })
+        var number = max(counter, InstallNumbers.highest(for: directory) + 1, (used.max() ?? 0) + 1)
+        while used.contains(number) { number += 1 }
         return number
     }
 
@@ -254,17 +287,48 @@ actor Store {
             .sorted { Store.key(for: $0) < Store.key(for: $1) }
     }
 
-    private func stagingSource(_ plan: InstallPlan, slot: Slot, hash: String) -> URL? {
-        let staged = stagingDirectory(plan.checksum).appendingPathComponent("\(hash).\(slot.fileType)")
-        if stagedObjects(checksum: plan.checksum).contains(staged.lastPathComponent) { return staged }
-        return heldObject(hash: hash, fileType: slot.fileType)
-    }
+    /// Where an install's files may come from, gathered once so a release of hundreds of slots stays linear.
+    private struct InstallSources {
+        private var staged: [URL] = []
+        private var stagedNames: [Set<String>] = []
+        private var installed: [String: [URL]]
+        private var active: (manifest: InstallManifest, directory: URL)?
 
-    private func activeFile(for slot: Slot) -> (URL, String)? {
-        guard let active = state.active, !state.badChecksums.contains(active.checksum),
-              let hash = readInstallManifest(named: active.directory)?.files[Store.key(for: slot)] else { return nil }
-        let url = fileURL(installNamed: active.directory, slot: slot)
-        return FileManager.default.fileExists(atPath: url.path) ? (url, hash) : nil
+        init(store: isolated Store, plan: InstallPlan) {
+            installed = store.installedCandidates()
+            var checksums = [plan.checksum]
+            if let held = store.state.stagingChecksum, held != plan.checksum, Store.isSafe(checksum: held) { checksums.append(held) }
+            for checksum in checksums where !store.state.badChecksums.contains(checksum) {
+                staged.append(store.stagingDirectory(checksum))
+                stagedNames.append(store.stagedObjects(checksum: checksum))
+            }
+            if let record = store.state.active, !store.state.badChecksums.contains(record.checksum),
+               let manifest = store.readInstallManifest(named: record.directory) {
+                active = (manifest, store.directory.appendingPathComponent("installs/\(record.directory)", isDirectory: true))
+            }
+        }
+
+        /// The first source whose bytes still hash to `hash`: a file can be cut short while its name stays.
+        func verifiedData(hash: String, fileType: String) -> Data? {
+            let name = "\(hash).\(fileType)"
+            var urls: [URL] = []
+            for (directory, names) in zip(staged, stagedNames) where names.contains(name) {
+                urls.append(directory.appendingPathComponent(name))
+            }
+            urls += installed[name] ?? []
+            for url in urls {
+                if let data = try? Data(contentsOf: url), Store.sha256Hex(data) == hash { return data }
+            }
+            return nil
+        }
+
+        /// The file the user sees now, carried over for a slot the release does not yet have.
+        func activeData(for slot: Slot) -> (Data, String)? {
+            guard let active, let hash = active.manifest.files[Store.key(for: slot)],
+                  let data = try? Data(contentsOf: Store.fileURL(in: active.directory, slot: slot)),
+                  Store.sha256Hex(data) == hash else { return nil }
+            return (data, hash)
+        }
     }
 
     private func writeFile(_ data: Data, in install: URL, slot: Slot, baseLocale: String?) throws {
@@ -283,8 +347,12 @@ actor Store {
         Store.fileURL(in: directory.appendingPathComponent("installs/\(name)", isDirectory: true), slot: slot)
     }
 
+    private static func relativePath(of slot: Slot) -> String {
+        "\(slot.bundleId).bundle/\(slot.locale).lproj/Localizable.\(slot.fileType)"
+    }
+
     private static func fileURL(in install: URL, slot: Slot) -> URL {
-        install.appendingPathComponent("\(slot.bundleId).bundle/\(slot.locale).lproj/Localizable.\(slot.fileType)")
+        install.appendingPathComponent(relativePath(of: slot))
     }
 
     private static func isSafeComponent(_ name: String) -> Bool {
@@ -293,17 +361,31 @@ actor Store {
     }
 
     func activate(_ install: InstallRecord) throws {
+        try requireOnDisk(install)
         var next = state
-        if next.active?.directory != install.directory { next.previous = next.active }
-        next.active = install
+        // Same release again (a language change) must not displace the last other release: a launch-crash revert of
+        // this checksum has to land on one that did not crash.
+        if next.active?.checksum != install.checksum { next.previous = next.active }
+        if next.active?.directory != install.directory { next.active = install }
         if next.pending?.directory == install.directory { next.pending = nil }
         try save(next)
+        unrecordedInstalls = []
     }
 
     func setPending(_ install: InstallRecord?) throws {
+        if let install { try requireOnDisk(install) }
         var next = state
         next.pending = install
         try save(next)
+        if install != nil { unrecordedInstalls = [] }
+    }
+
+    /// state.json must always name a complete directory.
+    private func requireOnDisk(_ install: InstallRecord) throws {
+        var isDirectory: ObjCBool = false
+        let path = directory.appendingPathComponent("installs/\(install.directory)").path
+        guard Store.isConsistent(install), FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue
+        else { throw StoreError.missingInstall(install.directory) }
     }
 
     /// Directories the lookup snapshot reads from; cleanup never removes them while this process runs.
@@ -316,26 +398,33 @@ actor Store {
     }
 
     nonisolated func fileURL(of install: InstallRecord, slot: Slot) -> URL? {
-        let url = Store.fileURL(in: self.url(of: install), slot: slot)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        let installURL = self.url(of: install)
+        let url = Store.fileURL(in: installURL, slot: slot)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        // A case-insensitive volume answers for `EN` with the file stored as `en`; only the exact name is this slot's.
+        guard let actual = try? url.resourceValues(forKeys: [.canonicalPathKey]).canonicalPath,
+              let base = try? installURL.resourceValues(forKeys: [.canonicalPathKey]).canonicalPath else { return url }
+        return actual == "\(base)/\(Store.relativePath(of: slot))" ? url : nil
     }
 
     /// Removes what nothing names; returns the removed paths relative to `<root>/Tarjim`.
     func cleanup() throws -> [String] {
         let tarjim = directory.deletingLastPathComponent().deletingLastPathComponent()
         var removed: [String] = []
-        let keptInstalls = Set([state.active, state.previous, state.pending].compactMap { $0?.directory }).union(protectedDirectories)
+        let keptInstalls = Set([state.active, state.previous, state.pending].compactMap { $0?.directory }).union(protectedDirectories).union(unrecordedInstalls)
         let keptStaging = state.stagingChecksum
 
-        try remove(in: tarjim, keeping: ["v1"], from: tarjim, into: &removed)
-        try remove(in: tarjim.appendingPathComponent("v1"), keeping: [directory.lastPathComponent], from: tarjim, into: &removed)
-        try remove(in: directory.appendingPathComponent("installs"), keeping: keptInstalls, from: tarjim, into: &removed)
+        try remove(in: tarjim, from: tarjim, into: &removed) { $0 != "v1" }
+        try remove(in: tarjim.appendingPathComponent("v1"), from: tarjim, into: &removed) { $0 != directory.lastPathComponent }
+        // A crash between writing and renaming leaves these behind.
+        try remove(in: directory, from: tarjim, into: &removed) { $0.hasPrefix(".state-") && $0.hasSuffix(".tmp") }
+        try remove(in: directory.appendingPathComponent("installs"), from: tarjim, into: &removed) { !keptInstalls.contains($0) }
         let staging = directory.appendingPathComponent("staging")
-        try remove(in: staging, keeping: keptStaging.map { [$0] } ?? [], from: tarjim, into: &removed)
+        try remove(in: staging, from: tarjim, into: &removed) { $0 != keptStaging }
         if let keptStaging {
-            let builds = try entries(of: staging.appendingPathComponent(keptStaging)).filter { $0.hasPrefix("build-") }
-            try remove(in: staging.appendingPathComponent(keptStaging), keeping: Set(try entries(of: staging.appendingPathComponent(keptStaging))).subtracting(builds),
-                       from: tarjim, into: &removed)
+            try remove(in: staging.appendingPathComponent(keptStaging), from: tarjim, into: &removed) {
+                $0.hasPrefix("build-") || ($0.hasPrefix(".") && $0.hasSuffix(".tmp"))
+            }
         }
         return removed
     }
@@ -345,8 +434,8 @@ actor Store {
         return try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
     }
 
-    private func remove(in parent: URL, keeping kept: Set<String>, from base: URL, into removed: inout [String]) throws {
-        for name in try entries(of: parent) where !kept.contains(name) {
+    private func remove(in parent: URL, from base: URL, into removed: inout [String], where shouldRemove: (String) -> Bool) throws {
+        for name in try entries(of: parent) where shouldRemove(name) {
             let url = parent.appendingPathComponent(name)
             try FileManager.default.removeItem(at: url)
             removed.append(String(url.standardizedFileURL.path.dropFirst(base.standardizedFileURL.path.count + 1)))
