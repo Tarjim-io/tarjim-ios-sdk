@@ -21,7 +21,8 @@ final class RuntimeLifecycleTests: XCTestCase {
             harness.clock.advance(3600)
         }
         XCTAssertEqual(harness.reports.value.map(\.kind), [])
-        let state = await (try StoreFixtures.store(harness.root)).state
+        let identifier = StoreIdentifier.make(host: DeliveryFixtures.host, projectId: DeliveryFixtures.projectId, apiKey: DeliveryFixtures.apiKey)
+        let state = await (try StoreFixtures.store(harness.root, identifier: identifier)).state
         XCTAssertNotNil(state.active, "the release was installed by the schedule and stayed")
         XCTAssertEqual(state.badChecksums, [])
     }
