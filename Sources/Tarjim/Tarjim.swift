@@ -140,10 +140,10 @@ public enum Tarjim {
         #if canImport(UIKit)
         let center = NotificationCenter.default
         center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: nil) { _ in
-            Task { await runtime.resignedActive() }
+            runtime.noteResignedActive()
         }
         center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { _ in
-            Task { await runtime.becameActive() }
+            runtime.noteBecameActive()
         }
         #endif
     }
@@ -176,5 +176,23 @@ public struct TarjimConfiguration: Sendable {
         self.host = host
         self.defaultBundle = defaultBundle
         self.fallbackLanguage = fallbackLanguage
+    }
+}
+
+/// The key is never shown, whichever way the configuration is printed.
+extension TarjimConfiguration: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    public var description: String {
+        "TarjimConfiguration(projectId: \(projectId), apiKey: <redacted>, host: \(host), defaultBundle: \(defaultBundle), "
+            + "fallbackLanguage: \(fallbackLanguage))"
+    }
+
+    public var debugDescription: String { description }
+
+    public var customMirror: Mirror {
+        Mirror(self, children: [
+            "projectId": projectId, "apiKey": "<redacted>", "host": host, "defaultBundle": defaultBundle,
+            "fallbackLanguage": fallbackLanguage, "sendsInstallIdentifier": sendsInstallIdentifier,
+            "interceptsMainBundle": interceptsMainBundle,
+        ])
     }
 }

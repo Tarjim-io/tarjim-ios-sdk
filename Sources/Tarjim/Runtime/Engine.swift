@@ -20,6 +20,8 @@ struct EngineEnvironment: Sendable {
     let fallbackLanguage: String
     let now: @Sendable () -> Date
     let random: @Sendable () -> Double
+    /// Called synchronously, inside the activation lock, right after an install is activated.
+    var activated: @Sendable () -> Void = {}
 }
 
 /// Event streams and the language override, read from synchronous contexts.
@@ -136,6 +138,8 @@ actor Engine {
         guard seconds.isFinite, seconds >= 0 else { return }
         // Inside the activation lock, so a tick never closes the probation of an install activated meanwhile.
         await exclusive {
+            // A timer cancelled by an activation while this waited for the lock must not count toward the new install.
+            guard !Task.isCancelled else { return }
             foregroundSeconds += seconds
             guard foregroundSeconds >= Engine.probationSeconds else { return }
             let store = environment.store
@@ -222,6 +226,7 @@ actor Engine {
         } catch { return false }
         // The new install's probation starts from zero, whatever this process has already spent in the foreground.
         foregroundSeconds = 0
+        environment.activated()
         await rebuildSnapshot()
         box.send(.activated)
         return true
