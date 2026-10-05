@@ -4,63 +4,86 @@ import XCTest
 
 /// The fixture set is the server's side of every later test, so it must be internally consistent
 /// and shaped like what the delivery routes really send.
+///
+/// `release-1/` is hand-built and holds both delivery modes; a recording made by
+/// `scripts/capture-fixtures.sh` lands in `recorded/<name>/` with the same layout and one mode.
 final class FixtureSetTests: XCTestCase {
-    private let release = "release-1"
+    private static let handBuilt = "release-1"
 
-    private func manifest() throws -> [String: Any] {
-        let data = try Fixtures.data("\(release)/manifest.json")
-        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    /// Every directory holding a release: the hand-built one and each recording.
+    private func releases() throws -> [String] {
+        let dirs = Set(try Fixtures.allFiles().filter { $0.hasSuffix("/manifest.json") }.map { String($0.dropLast("/manifest.json".count)) })
+        XCTAssertTrue(dirs.contains(Self.handBuilt))
+        return dirs.sorted()
     }
 
-    private func slices() throws -> [String: [String: [String: [String: Any]]]] {
-        try XCTUnwrap(manifest()["slices"] as? [String: [String: [String: [String: Any]]]], "manifest.slices has the wrong shape")
+    private func metaModes(_ release: String) throws -> [String] {
+        try ["cdn", "origin"].filter { FileManager.default.fileExists(atPath: try Fixtures.url("\(release)/meta.\($0).json").path) }
+    }
+
+    private func manifest(_ release: String) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: Fixtures.data("\(release)/manifest.json")) as? [String: Any])
+    }
+
+    private func slices(_ release: String) throws -> [String: [String: [String: [String: Any]]]] {
+        try XCTUnwrap(manifest(release)["slices"] as? [String: [String: [String: [String: Any]]]], "\(release): manifest.slices has the wrong shape")
     }
 
     func testManifestChecksumMatchesMetaInBothModes() throws {
-        let checksum = Fixtures.sha256Hex(try Fixtures.data("\(release)/manifest.json"))
-        for mode in ["cdn", "origin"] {
-            let meta = try Fixtures.envelope("\(release)/meta.\(mode).json")
-            XCTAssertEqual(meta.status, 200, mode)
-            XCTAssertEqual(try meta.jsonBody()["checksum"] as? String, checksum, "meta.\(mode).checksum")
+        XCTAssertEqual(try metaModes(Self.handBuilt), ["cdn", "origin"], "the hand-built release holds both modes")
+        for release in try releases() {
+            let checksum = Fixtures.sha256Hex(try Fixtures.data("\(release)/manifest.json"))
+            let modes = try metaModes(release)
+            XCTAssertFalse(modes.isEmpty, "\(release) has no meta")
+            for mode in modes {
+                let meta = try Fixtures.envelope("\(release)/meta.\(mode).json")
+                XCTAssertEqual(meta.status, 200, "\(release) \(mode)")
+                XCTAssertEqual(try meta.jsonBody()["checksum"] as? String, checksum, "\(release) meta.\(mode).checksum")
+            }
         }
     }
 
     func testEveryManifestEntryHasItsObjectWithMatchingHashAndSize() throws {
-        var count = 0
-        for (bundle, byLocale) in try slices() {
-            for (locale, byFileType) in byLocale {
-                for (fileType, entry) in byFileType {
-                    let hash = try XCTUnwrap(entry["hash"] as? String, "\(bundle)/\(locale)/\(fileType) hash")
-                    let size = try XCTUnwrap(entry["size"] as? Int, "\(bundle)/\(locale)/\(fileType) size")
-                    XCTAssertNotNil(entry["transferSize"] as? Int, "\(bundle)/\(locale)/\(fileType) transferSize")
-                    let bytes = try Fixtures.data("\(release)/objects/\(hash).\(fileType)")
-                    XCTAssertEqual(Fixtures.sha256Hex(bytes), hash, "\(bundle)/\(locale)/\(fileType)")
-                    XCTAssertEqual(bytes.count, size, "\(bundle)/\(locale)/\(fileType)")
-                    count += 1
+        for release in try releases() {
+            var count = 0
+            for (bundle, byLocale) in try slices(release) {
+                for (locale, byFileType) in byLocale {
+                    for (fileType, entry) in byFileType {
+                        let slot = "\(release) \(bundle)/\(locale)/\(fileType)"
+                        let hash = try XCTUnwrap(entry["hash"] as? String, "\(slot) hash")
+                        let size = try XCTUnwrap(entry["size"] as? Int, "\(slot) size")
+                        XCTAssertNotNil(entry["transferSize"] as? Int, "\(slot) transferSize")
+                        let bytes = try Fixtures.data("\(release)/objects/\(hash).\(fileType)")
+                        XCTAssertEqual(Fixtures.sha256Hex(bytes), hash, slot)
+                        XCTAssertEqual(bytes.count, size, slot)
+                        count += 1
+                    }
                 }
             }
+            XCTAssertGreaterThan(count, 0, release)
         }
-        XCTAssertGreaterThan(count, 0)
     }
 
     func testNoObjectIsUnlisted() throws {
-        var listed = Set<String>()
-        for byLocale in try slices().values {
-            for byFileType in byLocale.values {
-                for (fileType, entry) in byFileType {
-                    listed.insert("\(entry["hash"] as? String ?? "?").\(fileType)")
+        let files = try Fixtures.allFiles()
+        for release in try releases() {
+            var listed = Set<String>()
+            for byLocale in try slices(release).values {
+                for byFileType in byLocale.values {
+                    for (fileType, entry) in byFileType {
+                        listed.insert("\(entry["hash"] as? String ?? "?").\(fileType)")
+                    }
                 }
             }
+            let prefix = "\(release)/objects/"
+            let onDisk = files.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+            XCTAssertEqual(Set(onDisk), listed, release)
         }
-        let onDisk = try Fixtures.allFiles()
-            .filter { $0.hasPrefix("\(release)/objects/") }
-            .map { String($0.dropFirst("\(release)/objects/".count)) }
-        XCTAssertEqual(Set(onDisk), listed)
     }
 
     /// A release lists both iOS files for every (bundle, locale), an empty one included, beside `json`.
     func testEveryBundleAndLocaleListsJsonStringsAndStringsdict() throws {
-        let slices = try slices()
+        let slices = try slices(Self.handBuilt)
         XCTAssertGreaterThanOrEqual(slices.count, 3, "at least two namespaces and one custom bundle")
         for (bundle, byLocale) in slices {
             XCTAssertGreaterThanOrEqual(byLocale.count, 2, bundle)
@@ -68,7 +91,7 @@ final class FixtureSetTests: XCTestCase {
                 XCTAssertEqual(Set(byFileType.keys), ["json", "strings", "stringsdict"], "\(bundle)/\(locale)")
             }
         }
-        let bundles = try XCTUnwrap(manifest()["bundles"] as? [String: [String: Any]])
+        let bundles = try XCTUnwrap(manifest(Self.handBuilt)["bundles"] as? [String: [String: Any]])
         XCTAssertEqual(Set(bundles.keys), Set(slices.keys))
         XCTAssertTrue(bundles.values.contains { $0["type"] as? String == "custom" })
         XCTAssertTrue(bundles.values.contains { $0["type"] as? String == "namespace" })
@@ -85,32 +108,47 @@ final class FixtureSetTests: XCTestCase {
     }
 
     func testMetaShapesForCdnAndOriginMode() throws {
-        let cdn = try Fixtures.envelope("\(release)/meta.cdn.json").jsonBody()
-        XCTAssertEqual(cdn["authenticated"] as? Bool, false)
-        XCTAssertNotNil(cdn["signedQuery"] as? String)
-        XCTAssertNotNil(cdn["signatureExpires"] as? Int)
-        for field in ["manifestUrl", "slicesBaseUrl"] {
-            let url = try XCTUnwrap(cdn[field] as? String, field)
-            XCTAssertTrue(url.hasPrefix("https://"), "cdn \(field) is absolute")
-            XCTAssertFalse(url.contains("?"), "cdn \(field) carries no query")
-        }
+        let etag = try NSRegularExpression(pattern: #"^"m\d+-[0-9a-f]{64}-p\d+(-c(\d+))?"$"#)
+        for release in try releases() {
+            for mode in try metaModes(release) {
+                let envelope = try Fixtures.envelope("\(release)/meta.\(mode).json")
+                let body = try envelope.jsonBody()
+                let label = "\(release) \(mode)"
+                if mode == "cdn" {
+                    XCTAssertEqual(body["authenticated"] as? Bool, false, label)
+                    XCTAssertNotNil(body["signedQuery"] as? String, label)
+                    XCTAssertNotNil(body["signatureExpires"] as? Int, label)
+                } else {
+                    XCTAssertEqual(body["authenticated"] as? Bool, true, label)
+                    XCTAssertNil(body["signedQuery"], "\(label): origin mode has no signedQuery key at all")
+                    XCTAssertNil(body["signatureExpires"], label)
+                }
+                for field in ["manifestUrl", "slicesBaseUrl"] {
+                    let url = try XCTUnwrap(body[field] as? String, "\(label) \(field)")
+                    XCTAssertFalse(url.contains("?"), "\(label) \(field) carries no query")
+                    if mode == "cdn" {
+                        XCTAssertTrue(url.hasPrefix("https://"), "\(label) \(field) is absolute")
+                    } else {
+                        XCTAssertFalse(url.contains("://") || url.hasPrefix("/"), "\(label) \(field) is path-relative")
+                    }
+                }
+                XCTAssertEqual(body["schemaVersion"] as? Int, 1, label)
+                XCTAssertNotNil(body["releaseId"] as? Int, label)
+                XCTAssertNotNil(body["stage"] as? String, label)
+                XCTAssertNotNil(body["track"] as? String, label)
+                // A monotone counter in unix seconds, never a date string.
+                XCTAssertTrue(body["resultsLastUpdate"] is NSNull || body["resultsLastUpdate"] is Int, "\(label) resultsLastUpdate")
+                let pollAfter = try XCTUnwrap(body["pollAfter"] as? Int, label)
+                XCTAssertTrue((60...3600).contains(pollAfter), label)
 
-        let origin = try Fixtures.envelope("\(release)/meta.origin.json").jsonBody()
-        XCTAssertEqual(origin["authenticated"] as? Bool, true)
-        XCTAssertNil(origin["signedQuery"], "origin mode has no signedQuery key at all")
-        XCTAssertNil(origin["signatureExpires"])
-        for field in ["manifestUrl", "slicesBaseUrl"] {
-            let url = try XCTUnwrap(origin[field] as? String, field)
-            XCTAssertFalse(url.contains("://") || url.hasPrefix("/") || url.contains("?"), "origin \(field) is path-relative")
-        }
-
-        for body in [cdn, origin] {
-            XCTAssertEqual(body["schemaVersion"] as? Int, 1)
-            XCTAssertNotNil(body["releaseId"] as? Int)
-            XCTAssertNotNil(body["stage"] as? String)
-            XCTAssertNotNil(body["track"] as? String)
-            let pollAfter = try XCTUnwrap(body["pollAfter"] as? Int)
-            XCTAssertTrue((60...3600).contains(pollAfter))
+                let tag = try XCTUnwrap(envelope.header("ETag"), "\(label) ETag")
+                let match = try XCTUnwrap(etag.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)), "\(label) ETag \(tag)")
+                XCTAssertEqual(match.range(at: 2).location != NSNotFound, mode == "cdn", "\(label): only CDN mode adds a bucket")
+                if mode == "cdn", let bucket = Range(match.range(at: 2), in: tag).flatMap({ Int(tag[$0]) }) {
+                    // The bucket is floor(epoch / 30 s), not an epoch.
+                    XCTAssertLessThan(bucket, 100_000_000, "\(label) ETag bucket")
+                }
+            }
         }
     }
 
@@ -127,7 +165,12 @@ final class FixtureSetTests: XCTestCase {
             "meta-404-stage-unreleased": (404, "delivery.stage_unreleased", 900),
             "meta-404-not-found": (404, "not-found", nil),
             "meta-429-too-many-requests": (429, "too-many-requests", nil),
+            "meta-429-invalid-key-limiter": (429, "too-many-requests", nil),
+            "meta-500-cdn-signing-failed": (500, "delivery.cdn_signing_failed", nil),
+            "meta-502-upstream-error": (502, "upstream-error", nil),
             "meta-503-disabled": (503, "delivery.disabled", nil),
+            "meta-503-cdn-edge": (503, nil, nil),
+            "manifest-404-manifest-not-found": (404, "delivery.manifest_not_found", nil),
             "manifest-503-manifest-unavailable": (503, "delivery.manifest_unavailable", nil),
             "object-403-cdn-edge": (403, nil, nil),
             "object-404-slice-not-found": (404, "delivery.slice_not_found", nil),
@@ -144,19 +187,29 @@ final class FixtureSetTests: XCTestCase {
             }
         }
         XCTAssertNil(try Fixtures.envelope("errors/meta-304.json").body, "a 304 has no body")
-        let edge = try Fixtures.envelope("errors/object-403-cdn-edge.json")
-        XCTAssertNil(edge.body.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) }, "an edge 403 is not JSON")
+        for edge in ["object-403-cdn-edge", "meta-503-cdn-edge"] {
+            let body = try Fixtures.envelope("errors/\(edge).json").body
+            XCTAssertNil(body.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) }, "\(edge) is not JSON")
+        }
         XCTAssertEqual(try Fixtures.envelope("errors/manifest-503-manifest-unavailable.json").header("Retry-After"), "30")
-        XCTAssertNotNil(try Fixtures.envelope("errors/meta-429-too-many-requests.json").header("Retry-After"))
+        XCTAssertNotNil(try Fixtures.envelope("errors/meta-429-too-many-requests.json").header("Retry-After"), "the per-key throttle")
+        XCTAssertNil(try Fixtures.envelope("errors/meta-429-invalid-key-limiter.json").header("Retry-After"), "the invalid-key limiter")
         XCTAssertNotNil(try Fixtures.envelope("errors/meta-400-validation.json").jsonBody()["supported"])
     }
 
-    func testEveryEnvelopeDeclaresItsProvenance() throws {
-        // Manifests and `objects/` hold raw served bytes, not envelopes.
-        let envelopes = try Fixtures.allFiles().filter {
-            $0.hasSuffix(".json") && !$0.hasSuffix("manifest.json") && !$0.contains("/objects/")
+    /// The API echoes its version header on every answer; an answer made at the CDN edge does not.
+    func testApiAnswersEchoTheVersionHeader() throws {
+        let fromTheEdge: Set<String> = ["errors/object-403-cdn-edge.json", "errors/meta-503-cdn-edge.json"]
+        let envelopes = try envelopePaths().filter { !fromTheEdge.contains($0) && !$0.contains("/objects/") }
+        XCTAssertGreaterThanOrEqual(envelopes.count, 19)
+        for path in envelopes {
+            XCTAssertNotNil(try Fixtures.envelope(path).header("X-Tarjim-Api-Version"), path)
         }
-        XCTAssertGreaterThanOrEqual(envelopes.count, 16)
+    }
+
+    func testEveryEnvelopeDeclaresItsProvenance() throws {
+        let envelopes = try envelopePaths()
+        XCTAssertGreaterThanOrEqual(envelopes.count, 21)
         for path in envelopes {
             XCTAssertTrue(["hand-built", "recorded"].contains(try Fixtures.envelope(path).provenance), path)
         }
@@ -174,48 +227,95 @@ final class FixtureSetTests: XCTestCase {
         let paths = try Fixtures.allFiles()
         XCTAssertGreaterThanOrEqual(paths.count, 20)
         for path in paths {
-            guard let text = String(data: try Fixtures.data(path), encoding: .utf8) else { continue }
-            XCTAssertEqual(try PublicSafety.leaks(in: text), [], path)
+            XCTAssertEqual(try PublicSafety.leaks(in: Fixtures.data(path)), [], path)
         }
     }
 
     func testLeakScanCatchesAKeyASignatureAndAHost() throws {
-        XCTAssertEqual(try PublicSafety.leaks(in: #"{"k":"tarjim-12-345-6-abcdef"}"#), ["API key"])
-        XCTAssertEqual(try PublicSafety.leaks(in: "Policy=eyJTdGF0&Signature=REDACTED"), ["signature Policy"])
-        XCTAssertEqual(try PublicSafety.leaks(in: "https://d1abc.cloudfront.net/releases/1/2/"), ["host d1abc.cloudfront.net"])
-        XCTAssertEqual(try PublicSafety.leaks(in: "https://staging.example.org/x"), ["host staging.example.org"])
-        XCTAssertEqual(try PublicSafety.leaks(in: "https://cdn.example.invalid/x?Policy=REDACTED&Signature=REDACTED&Key-Pair-Id=REDACTED"), [])
-        XCTAssertEqual(try PublicSafety.leaks(in: "https://api.tarjim.io/problems/not-found"), [])
-        XCTAssertEqual(try PublicSafety.leaks(in: "https://cdn.example.com/a.png"), [])
-        XCTAssertEqual(try PublicSafety.leaks(in: "https://notexample.com/a.png"), ["host notexample.com"])
+        func leaks(_ text: String) throws -> [String] { try PublicSafety.leaks(in: Data(text.utf8)) }
+        XCTAssertEqual(try leaks(#"{"k":"tarjim-12-345-6-abcdef"}"#), ["API key"])
+        XCTAssertEqual(try leaks("Policy=eyJTdGF0&Signature=REDACTED"), ["signature Policy"])
+        XCTAssertEqual(try leaks("https://d1abc.cloudfront.net/releases/1/2/"), ["host d1abc.cloudfront.net"])
+        XCTAssertEqual(try leaks("https://staging.example.org/x"), ["host staging.example.org"])
+        XCTAssertEqual(try leaks("https://notexample.com/a.png"), ["host notexample.com"])
+        // Forms a recording really produces: escaped, encoded, bare, lower-case, subdomains of allowed hosts.
+        XCTAssertEqual(try leaks(#"{"detail":"upstream staging-api.corp-internal.net rejected"}"#), ["host staging-api.corp-internal.net"])
+        XCTAssertEqual(try leaks(#""https:\/\/d1abc.cloudfront.net\/x""#), ["host d1abc.cloudfront.net"])
+        XCTAssertEqual(try leaks("https%3A%2F%2Fd1abc.cloudfront.net%2Fx%3FSignature%3DLIVESIG"), ["signature Signature", "host d1abc.cloudfront.net"])
+        XCTAssertEqual(try leaks("https://zz-fixture-probe.api.tarjim.io/x"), ["host zz-fixture-probe.api.tarjim.io"])
+        XCTAssertEqual(try leaks(#"{"k":"tarjim-12-345-6-abcdef"}"#), ["API key"])
+        XCTAssertEqual(try leaks(#"Signature=LIVESIG"#), ["signature Signature"])
+        XCTAssertEqual(try leaks("policy=LIVE&signature=LIVE"), ["signature policy", "signature signature"])
+        XCTAssertEqual(try PublicSafety.leaks(in: Data([0xE9]) + Data(" https://d1abc.cloudfront.net/".utf8)), ["host d1abc.cloudfront.net"])
+        XCTAssertEqual(try leaks("see staging.acme.com for details"), ["host staging.acme.com"])
+        // Allowed.
+        XCTAssertEqual(try leaks("https://cdn.example.invalid/x?Policy=REDACTED&Signature=REDACTED&Key-Pair-Id=REDACTED"), [])
+        XCTAssertEqual(try leaks("https://api.tarjim.io/problems/not-found"), [])
+        XCTAssertEqual(try leaks("https://cdn.example.com/a.png"), [])
+        XCTAssertEqual(try leaks(#"<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">"#), [])
+        XCTAssertEqual(try leaks(#""app.title" = "Tarjim"; "files.owner" = "%1$@ has %2$d files";"#), [])
+    }
+
+    private func envelopePaths() throws -> [String] {
+        // Manifests and `objects/` hold raw served bytes, not envelopes.
+        try Fixtures.allFiles().filter { $0.hasSuffix(".json") && !$0.hasSuffix("manifest.json") && !$0.contains("/objects/") }
     }
 }
 
 enum PublicSafety {
-    private static let allowedHosts = ["example.com", "www.apple.com", "api.tarjim.io"]
+    private static let allowedHosts = ["www.apple.com", "api.tarjim.io"]
+    private static let allowedDomains = ["example.com", "invalid"]
+    private static let tlds = "com|net|org|io|dev|cloud|ai|co|me|info|biz|tech|site|xyz|internal|local|corp|lan|intranet|aws"
 
-    /// What in `text` must not reach a public repository: an API key, a signature value other than
-    /// `REDACTED`, or a host outside the `.invalid` TLD and a short allow-list.
-    static func leaks(in text: String) throws -> [String] {
-        let range = NSRange(text.startIndex..., in: text)
-        func capture(_ match: NSTextCheckingResult, _ group: Int) -> String {
-            String(text[Range(match.range(at: group), in: text)!])
-        }
+    /// What in `bytes` must not reach a public repository: an API key, a signature value other than
+    /// `REDACTED`, or a host outside `*.invalid`, `*.example.com` and two exact hosts. The text is
+    /// also scanned with JSON and percent escapes undone, and bytes that are not UTF-8 are read as
+    /// Latin-1, so neither hides a match.
+    static func leaks(in bytes: Data) throws -> [String] {
+        let text = String(data: bytes, encoding: .utf8) ?? String(data: bytes, encoding: .isoLatin1)!
+        let unescaped = unescapeJSON(text)
+        let variants = [text, unescaped, unescaped.removingPercentEncoding ?? unescaped]
+
         var found: [String] = []
-        if try NSRegularExpression(pattern: #"tarjim-\d+-\d+-\d+-"#).firstMatch(in: text, range: range) != nil {
-            found.append("API key")
+        func add(_ item: String) {
+            if !found.contains(item) { found.append(item) }
         }
-        for match in try NSRegularExpression(pattern: #"(Policy|Signature|Key-Pair-Id|Expires)=([^&"\s\\]+)"#).matches(in: text, range: range)
-        where capture(match, 2) != "REDACTED" {
-            found.append("signature \(capture(match, 1))")
-        }
-        let hostPattern = try NSRegularExpression(pattern: #"[a-z][a-z0-9+.-]*://([^/\s"'?#:\\]+)"#, options: [.caseInsensitive])
-        for match in hostPattern.matches(in: text, range: range) {
-            let host = capture(match, 1).lowercased()
-            if !(host.hasSuffix(".invalid") || allowedHosts.contains { host == $0 || host.hasSuffix("." + $0) }) {
-                found.append("host \(host)")
+        for text in variants {
+            let range = NSRange(text.startIndex..., in: text)
+            func capture(_ match: NSTextCheckingResult, _ group: Int) -> String {
+                String(text[Range(match.range(at: group), in: text)!])
+            }
+            if try NSRegularExpression(pattern: #"tarjim-\d+-\d+-\d+-"#, options: [.caseInsensitive]).firstMatch(in: text, range: range) != nil {
+                add("API key")
+            }
+            let signature = try NSRegularExpression(pattern: #"\b(Policy|Signature|Key-Pair-Id|Expires)=([^&"\s\\]+)"#, options: [.caseInsensitive])
+            for match in signature.matches(in: text, range: range) where capture(match, 2) != "REDACTED" {
+                add("signature \(capture(match, 1))")
+            }
+            let withScheme = try NSRegularExpression(pattern: #"[a-z][a-z0-9+.-]*://([^/\s"'?#:\\%]+)"#, options: [.caseInsensitive])
+            let bare = try NSRegularExpression(pattern: #"(?<![\w.@%-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:\#(tlds)))(?![\w-])"#, options: [.caseInsensitive])
+            for match in withScheme.matches(in: text, range: range) + bare.matches(in: text, range: range) {
+                let host = capture(match, 1).lowercased()
+                if !isAllowed(host) { add("host \(host)") }
             }
         }
         return found
+    }
+
+    private static func isAllowed(_ host: String) -> Bool {
+        allowedHosts.contains(host) || allowedDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    private static func unescapeJSON(_ text: String) -> String {
+        var result = text.replacingOccurrences(of: #"\/"#, with: "/")
+        let unicode = try! NSRegularExpression(pattern: #"\\u([0-9a-fA-F]{4})"#)
+        for match in unicode.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed() {
+            let range = Range(match.range, in: result)!
+            let hex = String(result[Range(match.range(at: 1), in: result)!])
+            if let scalar = UInt32(hex, radix: 16).flatMap(Unicode.Scalar.init) {
+                result.replaceSubrange(range, with: String(Character(scalar)))
+            }
+        }
+        return result
     }
 }
