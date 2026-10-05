@@ -253,40 +253,41 @@ extension UpdateCycle {
     /// Persists the verdict onto the Store's current state: only the fields this cycle changed. `lastCheck` moves
     /// in every case; the backoff step restarts unless the cycle failed.
     private func conclude(_ verdict: Verdict, now: Date, start: StoreState) async -> CycleReport {
-        var state = await environment.store.state
-        state.lastCheck = now
-        if let pollAfter = verdict.pollAfter { state.lastPollAfter = pollAfter }
-        if let held = verdict.held {
-            state.heldMeta = held.raw
-            state.metaETag = held.etag
-        }
-        if let rejected = verdict.rejected { state.rejectedChecksums.insert(rejected) }
-        let interval: Int
-        let report: CycleReport
-        switch verdict.finish {
-        case let .settled(outcome, settledInterval):
-            interval = Bounds.interval(settledInterval)
-            state.backoffStep = 0
-            let delay = min(Schedule.pollDelay(pollAfter: interval, random: environment.random()), TimeInterval(Bounds.day))
-            report = CycleReport(outcome: outcome, nextCheckIn: delay)
-        case .backoff, .superseded:
-            // The step counts from where the cycle began; 1 000 doublings is far past any cap.
-            state.backoffStep = min(max(start.backoffStep, 0), 1_000) + 1
-            let known = Bounds.poll(verdict.pollAfter ?? start.lastPollAfter ?? 1800)
-            var retryAfter: Int?
-            if case let .backoff(value) = verdict.finish { retryAfter = value }
-            var wait = Schedule.backoff(step: state.backoffStep, pollAfter: known, retryAfter: Bounds.retry(retryAfter))
-            var outcome = CycleOutcome.failed
-            if case .superseded = verdict.finish {
-                wait = max(wait, 60)
-                outcome = .unchanged
+        var interval = 0
+        var report = CycleReport(outcome: .failed, nextCheckIn: 0)
+        let random = environment.random()
+        try? await environment.store.update { state in
+            state.lastCheck = now
+            if let pollAfter = verdict.pollAfter { state.lastPollAfter = pollAfter }
+            if let held = verdict.held {
+                state.heldMeta = held.raw
+                state.metaETag = held.etag
             }
-            interval = Bounds.interval(Int(wait.rounded(.up)))
-            report = CycleReport(outcome: outcome, nextCheckIn: TimeInterval(interval))
+            if let rejected = verdict.rejected { state.rejectedChecksums.insert(rejected) }
+            switch verdict.finish {
+            case let .settled(outcome, settledInterval):
+                interval = Bounds.interval(settledInterval)
+                state.backoffStep = 0
+                let delay = min(Schedule.pollDelay(pollAfter: interval, random: random), TimeInterval(Bounds.day))
+                report = CycleReport(outcome: outcome, nextCheckIn: delay)
+            case .backoff, .superseded:
+                // The step counts from where the cycle began; 1 000 doublings is far past any cap.
+                state.backoffStep = min(max(start.backoffStep, 0), 1_000) + 1
+                let known = Bounds.poll(verdict.pollAfter ?? start.lastPollAfter ?? 1800)
+                var retryAfter: Int?
+                if case let .backoff(value) = verdict.finish { retryAfter = value }
+                var wait = Schedule.backoff(step: state.backoffStep, pollAfter: known, retryAfter: Bounds.retry(retryAfter))
+                var outcome = CycleOutcome.failed
+                if case .superseded = verdict.finish {
+                    wait = max(wait, 60)
+                    outcome = .unchanged
+                }
+                interval = Bounds.interval(Int(wait.rounded(.up)))
+                report = CycleReport(outcome: outcome, nextCheckIn: TimeInterval(interval))
+            }
+            state.checkInterval = interval
         }
-        state.checkInterval = interval
         remembered = (now, interval)
-        try? await environment.store.save(state)
         return report
     }
 
@@ -407,11 +408,11 @@ extension UpdateCycle {
     }
 
     private func keepSignature(_ signature: Signature) async {
-        var state = await environment.store.state
-        guard signature.raw != state.heldMeta else { return }
-        state.heldMeta = signature.raw
-        state.metaETag = signature.etag
-        try? await environment.store.save(state)
+        try? await environment.store.update { state in
+            guard signature.raw != state.heldMeta else { return }
+            state.heldMeta = signature.raw
+            state.metaETag = signature.etag
+        }
     }
 
     // MARK: Download and build

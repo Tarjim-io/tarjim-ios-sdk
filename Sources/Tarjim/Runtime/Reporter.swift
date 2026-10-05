@@ -114,16 +114,13 @@ actor Reporter {
         if !delivered, logged.insert(identity).inserted { Log.debug(message) }
         guard let handler, !delivered else { return }
         handler(TarjimReport(kind: kind, message: message))
-        var state = await store.state
-        state.deliveredReports.insert(identity)
-        try? await store.save(state)
+        try? await store.update { $0.deliveredReports.insert(identity) }
     }
 
     private func clear(identity: String) async {
         logged.remove(identity)
-        var state = await store.state
-        guard state.deliveredReports.remove(identity) != nil else { return }
-        try? await store.save(state)
+        guard await store.state.deliveredReports.contains(identity) else { return }
+        try? await store.update { $0.deliveredReports.remove(identity) }
     }
 
     private func clear(prefix: String) async {
