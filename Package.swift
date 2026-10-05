@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "Tarjim", targets: ["Tarjim"]),
     ],
     targets: [
-        .target(name: "Tarjim"),
+        .target(name: "Tarjim", resources: [.copy("Resources/PrivacyInfo.xcprivacy")]),
         .testTarget(
             name: "TarjimTests",
             dependencies: ["Tarjim"],
