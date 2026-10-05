@@ -54,7 +54,8 @@ struct BundleEntry: Decodable, Sendable, Equatable {
 struct SliceEntry: Decodable, Sendable, Equatable {
     var hash: String
     var size: Int
-    var transferSize: Int
+    /// Advisory; a producer may omit it.
+    var transferSize: Int?
 }
 
 extension Meta: CustomStringConvertible, CustomDebugStringConvertible {

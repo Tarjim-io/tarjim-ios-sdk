@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// One endpoint, one identity and the chunk-0 fixtures, shared by the delivery tests.
+/// One endpoint, one identity and the recorded fixtures, shared by the delivery tests.
 enum DeliveryFixtures {
     static let host = URL(string: "https://api.example.invalid")!
     static let projectId = 1

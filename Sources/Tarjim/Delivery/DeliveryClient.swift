@@ -32,7 +32,7 @@ struct DeliveryClient: Sendable {
         switch response.statusCode {
         case 200:
             guard let meta = try? JSONDecoder().decode(Meta.self, from: data) else { return .unreadable }
-            return .changed(meta, etag: response.value(forHTTPHeaderField: "ETag"), raw: data)
+            return .received(meta, etag: response.value(forHTTPHeaderField: "ETag"), raw: data)
         case 304:
             return .notModified
         case 429:
@@ -49,13 +49,13 @@ struct DeliveryClient: Sendable {
     }
 
     func fetchManifest(_ meta: Meta) async -> ManifestOutcome {
-        guard let url = url(for: meta.manifestUrl, meta: meta) else { return .unfetchable(status: 0) }
+        guard let url = url(for: meta.manifestUrl, meta: meta) else { return .unfetchable(status: 0, retryAfter: nil) }
         switch await get(url, withKey: meta.authenticated) {
         case let .body(bytes):
             guard Verifier.matches(bytes, sha256Hex: meta.checksum) else { return .checksumMismatch }
             guard let manifest = try? JSONDecoder().decode(Manifest.self, from: bytes) else { return .unreadable }
             return .verified(manifest, raw: bytes)
-        case let .unfetchable(status): return .unfetchable(status: status)
+        case let .unfetchable(status): return .unfetchable(status: status, retryAfter: nil)
         case let .throttled(seconds): return .throttled(retryAfter: seconds)
         case let .serverError(seconds): return .serverError(retryAfter: seconds)
         case .networkFailure: return .networkFailure
@@ -67,12 +67,12 @@ struct DeliveryClient: Sendable {
         guard hash.count == 64, hash.allSatisfy({ $0.isASCII && ($0.isNumber || ("a"..."f").contains($0)) }),
               !fileType.isEmpty, fileType.allSatisfy({ $0.isASCII && $0.isLowercase && $0.isLetter }),
               let url = url(for: meta.slicesBaseUrl + hash + "." + fileType, meta: meta)
-        else { return .unfetchable(status: 0) }
+        else { return .unfetchable(status: 0, retryAfter: nil) }
         switch await get(url, withKey: meta.authenticated) {
         case let .body(bytes):
             if let expectedSize, bytes.count > expectedSize { return .tooLarge }
             return Verifier.matches(bytes, sha256Hex: hash) ? .verified(bytes) : .hashMismatch
-        case let .unfetchable(status): return .unfetchable(status: status)
+        case let .unfetchable(status): return .unfetchable(status: status, retryAfter: nil)
         case let .throttled(seconds): return .throttled(retryAfter: seconds)
         case let .serverError(seconds): return .serverError(retryAfter: seconds)
         case .networkFailure: return .networkFailure

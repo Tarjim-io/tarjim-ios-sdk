@@ -39,7 +39,7 @@ final class DeliveryClientMetaTests: XCTestCase {
     func testCDNMetaDecodesWithETagAndRawBytes() async throws {
         let envelope = try DeliveryFixtures.metaEnvelope("cdn")
         let (outcome, _) = try await fetch(FakeTransport.Answer(envelope))
-        guard case let .changed(meta, etag, raw) = outcome else { return XCTFail("\(outcome)") }
+        guard case let .received(meta, etag, raw) = outcome else { return XCTFail("\(outcome)") }
         XCTAssertEqual(meta.checksum, Fixtures.sha256Hex(try DeliveryFixtures.manifestBytes()))
         XCTAssertEqual(meta.authenticated, false)
         XCTAssertNotNil(meta.signedQuery)
@@ -52,7 +52,7 @@ final class DeliveryClientMetaTests: XCTestCase {
 
     func testOriginMetaDecodesAsAuthenticatedWithoutSignedQuery() async throws {
         let (outcome, _) = try await fetch(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("origin")))
-        guard case let .changed(meta, _, _) = outcome else { return XCTFail("\(outcome)") }
+        guard case let .received(meta, _, _) = outcome else { return XCTFail("\(outcome)") }
         XCTAssertEqual(meta.authenticated, true)
         XCTAssertNil(meta.signedQuery)
         XCTAssertEqual(meta.manifestUrl, "released/42/manifest")
@@ -63,7 +63,7 @@ final class DeliveryClientMetaTests: XCTestCase {
         body["authenticated"] = nil
         body["somethingNew"] = ["nested": true]
         let (outcome, _) = try await fetch(.json(200, body))
-        guard case let .changed(meta, _, _) = outcome else { return XCTFail("\(outcome)") }
+        guard case let .received(meta, _, _) = outcome else { return XCTFail("\(outcome)") }
         XCTAssertEqual(meta.authenticated, false)
     }
 
@@ -105,7 +105,7 @@ final class DeliveryClientMetaTests: XCTestCase {
     }
 
     func testUnknown404CodeIsConfigurationErrorWithItsPollAfterNeverLatest() async throws {
-        let (outcome, _) = try await fetch(.json(404, ["type": "https://api.tarjim.io/problems/delivery.something_new", "title": "Not Found",
+        let (outcome, _) = try await fetch(.json(404, ["type": "https://api.example.invalid/problems/delivery.something_new", "title": "Not Found",
                                                        "status": 404, "code": "delivery.something_new", "pollAfter": 120],
                                                  headers: ["Content-Type": "application/problem+json; charset=utf-8"]))
         XCTAssertEqual(outcome, .configurationError(code: "delivery.something_new", pollAfter: 120))
@@ -114,8 +114,38 @@ final class DeliveryClientMetaTests: XCTestCase {
     func testUnreadable4xxBodyIsConfigurationErrorWithUnknownCode() async throws {
         let (edge404, _) = try await fetch(FakeTransport.Answer(status: 404, headers: ["Content-Type": "text/html"], body: Data("<html>gone".utf8)))
         XCTAssertEqual(edge404, .configurationError(code: "unknown", pollAfter: nil))
-        let (teapot, _) = try await fetch(FakeTransport.Answer(status: 418))
-        XCTAssertEqual(teapot, .configurationError(code: "unknown", pollAfter: nil))
+    }
+
+    /// Only 400, 401, 403 and 404 are the configuration class; anything else outside the table is
+    /// backed off like a server error, redirects included (they are never followed).
+    func testStatusesOutsideTheTableBackOff() async throws {
+        for status in [418, 302, 204, 599] {
+            let (outcome, _) = try await fetch(FakeTransport.Answer(status: status, headers: ["Location": "https://other.example.invalid/"]))
+            XCTAssertEqual(outcome, .serverError(retryAfter: nil), "\(status)")
+        }
+    }
+
+    /// The server before the stage amendment answers a cold key with these codes; they are the same
+    /// normal state, not a misconfiguration to report.
+    func testOlderUnreleasedCodesAreUnreleasedToo() async throws {
+        for code in ["delivery.track_unreleased", "delivery.not_published"] {
+            let (outcome, _) = try await fetch(.json(404, ["status": 404, "code": code, "pollAfter": 60],
+                                                     headers: ["Content-Type": "application/problem+json; charset=utf-8"]))
+            XCTAssertEqual(outcome, .unreleased(pollAfter: 60), code)
+        }
+    }
+
+    func testAProblemBodyWithAnOddPollAfterStillYieldsItsCode() async throws {
+        let (outcome, _) = try await fetch(.json(404, ["status": 404, "code": "delivery.stage_unreleased", "pollAfter": "900"],
+                                                 headers: ["Content-Type": "application/problem+json; charset=utf-8"]))
+        XCTAssertEqual(outcome, .unreleased(pollAfter: nil))
+    }
+
+    func testAuthenticatedThatIsNotABoolIsUnreadable() async throws {
+        var body = try JSONSerialization.jsonObject(with: Data(try XCTUnwrap(DeliveryFixtures.metaEnvelope("origin").body).utf8)) as! [String: Any]
+        body["authenticated"] = "true"
+        let (outcome, _) = try await fetch(.json(200, body))
+        XCTAssertEqual(outcome, .unreadable, "fail closed rather than guess the mode")
     }
 
     func testRetryAfterIsReadAsSecondsOnly() async throws {

@@ -10,7 +10,13 @@ struct URLSessionTransport: Transport {
     private let session: URLSession
 
     init() {
-        session = URLSession(configuration: Self.makeConfiguration())
+        self.init(configuration: Self.makeConfiguration())
+    }
+
+    /// `configuration` lets a test install a stub `URLProtocol`; the session's policies (no
+    /// redirects) apply regardless of the configuration given.
+    init(configuration: URLSessionConfiguration) {
+        session = URLSession(configuration: configuration)
     }
 
     static func makeConfiguration() -> URLSessionConfiguration {
