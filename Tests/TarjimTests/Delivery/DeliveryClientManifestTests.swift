@@ -77,7 +77,8 @@ final class DeliveryClientManifestTests: XCTestCase {
         var hashInQuery = base; hashInQuery.signedQuery = "Policy=REDACTED#x"
         var relative = base; relative.manifestUrl = "releases/m/manifest.json"
         var spaced = base; spaced.signedQuery = "Policy=a b"
-        for (label, meta) in [("query", withQuery), ("fragment", withFragment), ("hash in query", hashInQuery), ("relative", relative), ("space", spaced)] {
+        var nonASCII = base; nonASCII.manifestUrl = "https://cdn.example.invalid/releases/m ñ.json"
+        for (label, meta) in [("query", withQuery), ("fragment", withFragment), ("hash in query", hashInQuery), ("relative", relative), ("space", spaced), ("non-ASCII", nonASCII)] {
             let (outcome, transport) = try await fetch(meta, try manifestAnswer())
             XCTAssertTrue(transport.requests.isEmpty, label)
             XCTAssertEqual(outcome, .refused, label)

@@ -9,13 +9,9 @@ protocol Transport: Sendable {
 struct URLSessionTransport: Transport {
     private let session: URLSession
 
-    init() {
-        self.init(configuration: Self.makeConfiguration())
-    }
-
-    /// `configuration` lets a test install a stub `URLProtocol`; the session's policies (no
-    /// redirects) apply regardless of the configuration given.
-    init(configuration: URLSessionConfiguration) {
+    /// One transport per process: the session (and its redirect-refusing delegate) lives as long
+    /// as the transport. A test passes a configuration with a stub `URLProtocol`.
+    init(configuration: URLSessionConfiguration = URLSessionTransport.makeConfiguration()) {
         session = URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)
     }
 

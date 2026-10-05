@@ -117,12 +117,28 @@ final class DeliveryClientMetaTests: XCTestCase {
     }
 
     /// Only 400, 401, 403 and 404 are the configuration class; anything else outside the table is
-    /// backed off like a server error, redirects included (they are never followed).
+    /// backed off like a server error.
     func testStatusesOutsideTheTableBackOff() async throws {
-        for status in [418, 302, 204, 599] {
-            let (outcome, _) = try await fetch(FakeTransport.Answer(status: status, headers: ["Location": "https://other.example.invalid/"]))
+        for status in [418, 204, 599] {
+            let (outcome, _) = try await fetch(FakeTransport.Answer(status: status))
             XCTAssertEqual(outcome, .serverError(retryAfter: nil), "\(status)")
         }
+    }
+
+    /// Redirects are never followed. On `meta` a 3xx means the configured host has moved: that is
+    /// a misconfiguration to report once, not something to back off from in silence for ever.
+    func testARedirectOnMetaIsAReportedConfigurationError() async throws {
+        for status in [301, 302, 307, 308] {
+            let (outcome, _) = try await fetch(FakeTransport.Answer(status: status, headers: ["Location": "https://other.example.invalid/"]))
+            XCTAssertEqual(outcome, .configurationError(code: "redirect", pollAfter: nil), "\(status)")
+        }
+    }
+
+    func testRetryAfterIsTrimmedAndNeverNegative() async throws {
+        let (padded, _) = try await fetch(FakeTransport.Answer(status: 503, headers: ["Retry-After": " 7 "]))
+        XCTAssertEqual(padded, .serverError(retryAfter: 7))
+        let (negative, _) = try await fetch(FakeTransport.Answer(status: 503, headers: ["Retry-After": "-5"]))
+        XCTAssertEqual(negative, .serverError(retryAfter: nil))
     }
 
     /// An older server answers a cold key with these codes; they are the same normal state, not a

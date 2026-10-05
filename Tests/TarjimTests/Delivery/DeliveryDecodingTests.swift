@@ -79,6 +79,41 @@ final class DeliveryDecodingTests: XCTestCase {
         XCTAssertEqual(manifest.slices["ns7"]?["en"]?["strings"]?.hash.count, 64)
     }
 
+    /// `transferSize` is advisory and must never cost a download, whatever a producer puts there.
+    func testABadTransferSizeKeepsTheEntry() async throws {
+        var object = try baseline()
+        var slices = object["slices"] as! [String: Any]
+        var ns7Slices = slices["ns7"] as! [String: Any]
+        var en = ns7Slices["en"] as! [String: Any]
+        var strings = en["strings"] as! [String: Any]
+        strings["transferSize"] = "lots"
+        en["strings"] = strings
+        ns7Slices["en"] = en
+        slices["ns7"] = ns7Slices
+        object["slices"] = slices
+        let manifest = try await verified(object)
+        let entry = try XCTUnwrap(manifest.slices["ns7"]?["en"]?["strings"])
+        XCTAssertNil(entry.transferSize)
+        XCTAssertEqual(entry.hash.count, 64)
+    }
+
+    /// Leniency holds one level up too: a locale node that is not an object is dropped with its
+    /// slots, nothing else is lost.
+    func testANonObjectLocaleNodeIsDroppedNotFatal() async throws {
+        var object = try baseline()
+        var slices = object["slices"] as! [String: Any]
+        var ns7Slices = slices["ns7"] as! [String: Any]
+        ns7Slices["en"] = "oops"
+        slices["ns7"] = ns7Slices
+        slices["ns12"] = 42
+        object["slices"] = slices
+        let manifest = try await verified(object)
+        XCTAssertNil(manifest.slices["ns7"]?["en"])
+        XCTAssertNotNil(manifest.slices["ns7"]?["ar"])
+        XCTAssertNil(manifest.slices["ns12"], "a bundle node that is not an object is dropped")
+        XCTAssertNotNil(manifest.slices["b3"]?["en"]?["strings"])
+    }
+
     /// A bundle entry without `type` and `name` cannot be addressed, so that bundle and its slices are
     /// dropped; the other bundles keep working rather than freezing every bundle until the next release.
     func testABundleEntryWithoutATypeOrNameIsDroppedWithItsSlices() async throws {
