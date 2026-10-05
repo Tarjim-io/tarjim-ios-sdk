@@ -25,6 +25,36 @@ final class Runtime: Sendable {
         private var scheduleTask: Task<Void, Never>?
         private var probationTask: Task<Void, Never>?
         private var resignedAt: Date?
+        private var startFinished = false
+        private var startWaiters: [CheckedContinuation<Void, Never>] = []
+
+        func finishStart() {
+            let waiters = lock.withLock {
+                startFinished = true
+                defer { startWaiters = [] }
+                return startWaiters
+            }
+            for waiter in waiters { waiter.resume() }
+        }
+
+        func waitForStart() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let ready = lock.withLock { () -> Bool in
+                    if !startFinished { startWaiters.append(continuation) }
+                    return startFinished
+                }
+                if ready { continuation.resume() }
+            }
+        }
+
+        /// Replaces the probation timer, only while the app is active (a timer exists).
+        func restartProbation(_ make: () -> Task<Void, Never>) {
+            lock.withLock {
+                guard let running = probationTask else { return }
+                running.cancel()
+                probationTask = make()
+            }
+        }
 
         /// True the first time only.
         func markStarted() -> Bool {
@@ -109,6 +139,7 @@ final class Runtime: Sendable {
     /// Launches the engine, cleans up, and reports a revert. Once per instance.
     func start(foreground: Bool) async {
         guard parts.markStarted() else { return }
+        defer { parts.finishStart() }
         let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: environment.appVersion,
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
@@ -122,7 +153,13 @@ final class Runtime: Sendable {
         // The stream is opened before the launch so no event is missed.
         let events = engine.updates()
         let parts = self.parts
-        Task.detached { for await update in events { parts.broadcast(update) } }
+        Task.detached { [self] in
+            for await update in events {
+                parts.broadcast(update)
+                // An install shown mid-session is proven by the foreground time after it, not before.
+                if update == .activated { parts.restartProbation(makeProbationTask) }
+            }
+        }
         await engine.launch(foreground: foreground)
         await reportRevert(of: engine)
 
@@ -183,16 +220,16 @@ final class Runtime: Sendable {
     /// The app became active: a process the system launched in the background counts as launched now, and the
     /// probation timer and the update schedule run until `resignedActive()`.
     func becameActive() async {
-        parts.startTasks(
-            probation: {
-                Task { [self] in
-                    await environment.sleep(Engine.probationSeconds)
-                    guard !Task.isCancelled else { return }
-                    await parts.engine?.foregroundElapsed(Engine.probationSeconds)
-                }
-            },
-            schedule: { Task { [self] in await runSchedule(iterations: nil) } })
+        parts.startTasks(probation: makeProbationTask, schedule: { Task { [self] in await runSchedule(iterations: nil) } })
         await didBecomeActive(afterBackground: parts.timeAway(now: environment.now()))
+    }
+
+    private func makeProbationTask() -> Task<Void, Never> {
+        Task { [self] in
+            await environment.sleep(Engine.probationSeconds)
+            guard !Task.isCancelled else { return }
+            await parts.engine?.foregroundElapsed(Engine.probationSeconds)
+        }
     }
 
     /// The app is no longer active: nothing runs until it is again.
@@ -210,6 +247,8 @@ final class Runtime: Sendable {
     /// The timer while the app is active: the launch delay, then a check every `nextCheckIn`. Stops after
     /// `iterations` checks (nil: until cancelled).
     func runSchedule(iterations: Int?) async {
+        // A check before `start` has built the engine would find nothing to run.
+        await parts.waitForStart()
         await environment.sleep(Schedule.launchDelay(random: environment.random()))
         var done = 0
         while !Task.isCancelled {
