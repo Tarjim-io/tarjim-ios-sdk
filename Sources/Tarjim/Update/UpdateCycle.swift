@@ -100,8 +100,6 @@ private struct Signature {
     var etag: String?
     /// C14 allows one extra read of `meta` per cycle.
     var reread = false
-    /// It just fetched the manifest, so an object it cannot reach is gone rather than unsigned.
-    var proven = false
 }
 
 private struct Abort {
@@ -291,7 +289,6 @@ extension UpdateCycle {
             guard Manifests.hasStrings(manifest) else { return reject(.noStrings) }
             let layout = layout(of: manifest, raw: raw)
             var signature = signature
-            signature.proven = true
             let fetched = await fetch(layout.wanted, layout: layout, signature: &signature)
             if let abort = fetched.abort { return Verdict(finish: .backoff(retryAfter: abort.retryAfter)) }
             if fetched.superseded { return supersededVerdict() }
@@ -418,23 +415,14 @@ extension UpdateCycle {
         guard result.abort == nil, !first.unfetchable.isEmpty, !signature.reread else { return result }
         signature.reread = true
         // The signature may have expired; one fresh read, ignoring any cached answer, is all C14 allows.
-        let proven = signature.proven
-        let retry: Bool
-        switch await environment.client.fetchMeta(ifNoneMatch: nil) {
-        case let .received(meta, etag, raw):
-            guard meta.checksum == signature.meta.checksum else {
-                result.superseded = true
-                return result
-            }
-            // Origin mode has no signature to renew; a proven one that did not change means the object is gone.
-            let changed = meta.signedQuery != signature.meta.signedQuery
-            retry = !(signature.meta.authenticated || meta.authenticated) && (changed || !proven)
-            signature = Signature(meta: meta, raw: raw, etag: etag, reread: true, proven: proven)
-        case .notModified:
-            retry = !proven && !signature.meta.authenticated
-        default:
+        guard case let .received(meta, etag, raw) = await environment.client.fetchMeta(ifNoneMatch: nil) else { return result }
+        guard meta.checksum == signature.meta.checksum else {
+            result.superseded = true
             return result
         }
+        // An unchanged signature means the object is gone, not expired.
+        let retry = meta.signedQuery != nil && meta.signedQuery != signature.meta.signedQuery
+        signature = Signature(meta: meta, raw: raw, etag: etag, reread: true)
         guard retry else { return result }
         let again = await pass(first.unfetchable, layout: layout, signature: signature)
         result.obtained += again.obtained
