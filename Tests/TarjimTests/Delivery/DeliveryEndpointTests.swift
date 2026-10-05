@@ -8,9 +8,12 @@ final class DeliveryEndpointTests: XCTestCase {
         XCTAssertEqual(endpoint.metaURL.absoluteString, "https://api.example.invalid/projects/7/delivery/meta")
     }
 
-    func testHostPortIsKept() throws {
+    /// Plain `http` would put the key on the wire in the clear; it is allowed for a local stack only.
+    func testHostPortIsKeptAndHTTPIsAllowedForLoopbackOnly() throws {
         let endpoint = try DeliveryEndpoint(host: URL(string: "http://localhost:8080")!, projectId: 7, apiKey: "k")
         XCTAssertEqual(endpoint.metaURL.absoluteString, "http://localhost:8080/projects/7/delivery/meta")
+        XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "http://127.0.0.1:3000")!, projectId: 7, apiKey: "k"))
+        XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "https://api.example.invalid:8443")!, projectId: 7, apiKey: "k"))
     }
 
     /// A trailing slash on the host is harmless; the meta URL still has none (the CDN answers 403
@@ -24,7 +27,8 @@ final class DeliveryEndpointTests: XCTestCase {
 
     func testHostWithPathQueryFragmentOrOtherSchemeIsRefused() {
         for bad in ["https://api.example.invalid/api", "https://api.example.invalid/?x=1", "https://api.example.invalid#f",
-                    "ftp://api.example.invalid", "api.example.invalid", "https://"] {
+                    "ftp://api.example.invalid", "api.example.invalid", "https://", "http://api.example.invalid",
+                    "https://user@api.example.invalid"] {
             XCTAssertThrowsError(try DeliveryEndpoint(host: URL(string: bad) ?? URL(string: "file:///")!, projectId: 1, apiKey: "k"), bad) {
                 XCTAssertEqual($0 as? DeliveryEndpoint.Error, .invalidHost, bad)
             }

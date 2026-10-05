@@ -28,6 +28,8 @@ final class DeliveryClientObjectTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Tarjim-Apikey"), DeliveryFixtures.apiKey)
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Tarjim-Api-Version"), "2026-07-29")
         XCTAssertNil(request.value(forHTTPHeaderField: "Accept-Encoding"))
+        XCTAssertNil(request.value(forHTTPHeaderField: "Range"))
+        XCTAssertEqual(request.httpMethod, "GET")
     }
 
     func testCDNModeURLCarriesTheSignedQueryAndNoTarjimHeader() async throws {
@@ -38,7 +40,8 @@ final class DeliveryClientObjectTests: XCTestCase {
         let request = try XCTUnwrap(transport.requests.first)
         XCTAssertEqual(request.url?.absoluteString, meta.slicesBaseUrl + object.hash + "." + object.fileType + "?" + (meta.signedQuery ?? ""))
         XCTAssertEqual(request.tarjimHeaders, [:])
-        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), DeliveryFixtures.identity.userAgent)
+        XCTAssertNil(request.value(forHTTPHeaderField: "User-Agent"), "identity travels with the key only")
+        XCTAssertEqual(request.httpMethod, "GET")
     }
 
     /// `hash` and `fileType` come from a downloaded manifest; only a 64-hex hash and a plain
@@ -49,7 +52,7 @@ final class DeliveryClientObjectTests: XCTestCase {
                                  (String(repeating: "a", count: 64), "../meta"), (String(repeating: "A", count: 64), strings)] {
             let (outcome, transport) = try await fetch(meta, hash: hash, fileType: fileType, expectedSize: nil, FakeTransport.Answer(status: 200))
             XCTAssertTrue(transport.requests.isEmpty, "\(hash).\(fileType) was requested")
-            if case .verified = outcome { XCTFail("verified \(hash).\(fileType)") }
+            XCTAssertEqual(outcome, .refused, "\(hash).\(fileType)")
         }
     }
 
@@ -102,11 +105,13 @@ final class DeliveryClientObjectTests: XCTestCase {
         let meta = try DeliveryFixtures.meta("cdn")
         let object = try firstObject()
         let cases: [(FakeTransport.Answer, ObjectOutcome)] = [
-            (try DeliveryFixtures.error("object-403-cdn-edge"), .unfetchable(status: 403)),
-            (try DeliveryFixtures.error("object-404-slice-not-found"), .unfetchable(status: 404)),
-            (FakeTransport.Answer(status: 503, headers: ["Retry-After": "30"]), .unfetchable(status: 503)),
+            (try DeliveryFixtures.error("object-403-cdn-edge"), .unfetchable(status: 403, retryAfter: nil)),
+            (try DeliveryFixtures.error("object-404-slice-not-found"), .unfetchable(status: 404, retryAfter: nil)),
+            (FakeTransport.Answer(status: 503, headers: ["Retry-After": "30"]), .unfetchable(status: 503, retryAfter: 30)),
+            (FakeTransport.Answer(status: 410), .unfetchable(status: 410, retryAfter: nil)),
             (FakeTransport.Answer(status: 429, headers: ["Retry-After": "9"]), .throttled(retryAfter: 9)),
             (FakeTransport.Answer(status: 500), .serverError(retryAfter: nil)),
+            (FakeTransport.Answer(status: 302, headers: ["Location": "https://other.example.invalid/"]), .serverError(retryAfter: nil)),
         ]
         for (answer, want) in cases {
             let (outcome, _) = try await fetch(meta, hash: object.hash, fileType: object.fileType, expectedSize: object.size, answer)
@@ -127,7 +132,7 @@ final class DeliveryClientObjectTests: XCTestCase {
         let object = try firstObject()
         transport.enqueue(FakeTransport.Answer(status: 200, body: object.bytes))
         let client = try DeliveryFixtures.client(transport)
-        guard case let .changed(meta, _, _) = await client.fetchMeta(ifNoneMatch: nil) else { return XCTFail("meta") }
+        guard case let .received(meta, _, _) = await client.fetchMeta(ifNoneMatch: nil) else { return XCTFail("meta") }
         _ = await client.fetchManifest(meta)
         _ = await client.fetchObject(meta, hash: object.hash, fileType: object.fileType, expectedSize: object.size)
         XCTAssertEqual(transport.requests.count, 3)

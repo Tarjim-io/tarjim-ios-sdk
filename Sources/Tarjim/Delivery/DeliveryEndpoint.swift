@@ -42,8 +42,7 @@ struct ClientIdentity: Sendable, Equatable {
     var appVersion: String
     var osVersion: String
     var language: String
-    /// A random per-install identifier; sent only when set. Whether it is set by default is not
-    /// this type's decision.
+    /// A random per-install identifier, sent only when set.
     var installIdentifier: String?
 
     var userAgent: String {
