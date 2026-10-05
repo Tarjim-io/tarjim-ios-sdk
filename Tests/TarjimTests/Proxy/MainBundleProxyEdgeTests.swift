@@ -151,4 +151,31 @@ final class MainBundleProxyEdgeTests: XCTestCase {
         XCTAssertEqual(attributed(bundle, "app.title").string, "ترجم")
         XCTAssertEqual(AttributedCountingBundle.count, 3)
     }
+
+    private func countingApp(_ selection: LocaleSelection) throws -> (Bundle, Resolver) {
+        let bundle = try LookupFixtures.appBundle(for: self)
+        object_setClass(bundle, CountingBundle.self)
+        CountingBundle.reset()
+        let resolver = LookupFixtures.resolver(app: AppResources(bundle: bundle, language: "en"), install: try LookupFixtures.install(for: self),
+                                               selection: selection)
+        XCTAssertTrue(MainBundleProxy.install(on: bundle) { key, table in resolver.downloaded(key, table: table) })
+        return (bundle, resolver)
+    }
+
+    /// With a regional selection (`ar-EG`, then `ar`), a miss still reaches the app's own lookup once.
+    func testARegionalSelectionAsksTheAppOncePerMiss() throws {
+        let (_, resolver) = try countingApp(LocaleSelection(kind: .user, locales: ["en-GB", "en"]))
+        XCTAssertEqual(resolver.string("nowhere"), "nowhere")
+        XCTAssertEqual(CountingBundle.count, 1)
+    }
+
+    /// A proxied lookup follows the same chain as `Tarjim.string`: the download, then the app's own folder for the
+    /// selected locale, then the app as Apple resolves it.
+    func testAProxiedLookupTriesTheAppsSelectedFolder() throws {
+        let (bundle, resolver) = try countingApp(LocaleSelection(kind: .user, locales: ["ar"]))
+        XCTAssertEqual(resolver.string("app.only"), "من التطبيق")
+        XCTAssertEqual(bundle.localizedString(forKey: "app.only", value: nil, table: nil), "من التطبيق")
+        XCTAssertEqual(bundle.localizedString(forKey: "count.only", value: nil, table: nil), "%d left", "not in ar.lproj: the app as resolved")
+        XCTAssertEqual(CountingBundle.count, 1)
+    }
 }
