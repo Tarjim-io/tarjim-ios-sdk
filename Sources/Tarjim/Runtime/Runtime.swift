@@ -223,6 +223,8 @@ final class Runtime: Sendable {
         return report
     }
 
+    func setLanguage(_ identifier: String?) async {}
+
     func activatePendingUpdate() async -> Bool {
         guard let engine = parts.engine else { return false }
         return await engine.activatePendingUpdate()
