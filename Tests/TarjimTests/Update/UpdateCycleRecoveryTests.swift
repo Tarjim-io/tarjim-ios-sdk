@@ -49,7 +49,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(result1.outcome, .unchanged)
     }
 
-    /// The C14 re-read can show the stage has moved on; the release it left is not recorded, and the next check is now.
+    /// The C14 re-read can show the stage has moved on; the release it left is not recorded, and the next check is soon.
     func testAReReadNamingAnotherReleaseRecordsNothing() async throws {
         let device = try Device(self)
         let one = try Release.one()
@@ -59,10 +59,11 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         device.server.answerMeta(one.metaAnswer(), two.metaAnswer())
         device.server.answerObject(hash: try one.hash(of: en), fileType: "strings", try DeliveryFixtures.error("object-403-cdn-edge"))
         let report = try await device.cycle().run()
-        XCTAssertEqual(report.nextCheckIn, 0)
+        XCTAssertEqual(report.nextCheckIn, 60, "soon, but never a loop with no delay")
         if case .installed = report.outcome { XCTFail("recorded the release the stage left") }
         let state = await device.state
         XCTAssertNil(state.pending)
+        device.clock.advance(60)
         let next = try await device.cycle().run()
         guard case .installed(let install) = next.outcome else { return XCTFail("\(next)") }
         XCTAssertEqual(install.checksum, two.checksum)
@@ -378,5 +379,171 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         guard case .installed(let install) = report.outcome else { return XCTFail("\(report)") }
         XCTAssertEqual(install.owedSlots, [])
         XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+    }
+
+    /// An owed slot holds the active install's older file; it is still owed, and retried in the next due cycle.
+    func testAnOwedSlotCarryingTheActiveFileIsRetried() async throws {
+        let device = try Device(self)
+        let one = try Release.one()
+        device.server.publish(one)
+        try await device.runAndActivate()
+        let newer = Data("\"app.title\" = \"Tarjim 2\";".utf8)
+        let two = try one.changing(releaseId: 43, slots: [en: newer])
+        device.server.publish(two)
+        device.server.answerObject(hash: Fixtures.sha256Hex(newer), fileType: "strings", try DeliveryFixtures.error("object-404-slice-not-found"))
+        device.clock.advance(1800)
+        let first = try await device.cycle().run()
+        guard case .installed(let carried) = first.outcome else { return XCTFail("\(first)") }
+        XCTAssertEqual(carried.owedSlots, [en])
+        try await device.store.activate(carried)
+        device.clock.advance(1800)
+        let second = try await device.cycle().run()
+        guard case .installed(let fixed) = second.outcome else { return XCTFail("\(second)") }
+        XCTAssertEqual(fixed.owedSlots, [])
+        XCTAssertEqual(try device.file(fixed, en), newer)
+    }
+
+    /// Step A's own `meta` read failing is not a failed cycle: the cadence stays as it was.
+    func testALanguageChangeWhoseMetaReadFailsLeavesTheCadence() async throws {
+        let device = try Device(self, locales: ["en"])
+        device.server.publish(try Release.one())
+        try await device.runAndActivate()
+        var state = await device.state
+        state.heldMeta = nil
+        try await device.store.save(state)
+        let before = await device.state
+        device.server.answerMeta(FakeTransport.Answer(status: 503))
+        device.selection.set(["ar"])
+        let report = try await device.cycle().languageChanged()
+        XCTAssertEqual(report.outcome, .failed)
+        let after = await device.state
+        XCTAssertEqual(after.lastCheck, before.lastCheck)
+        XCTAssertEqual(after.backoffStep, before.backoffStep)
+        XCTAssertEqual(after.checkInterval, before.checkInterval)
+    }
+
+    /// Nothing released to the stage (any more) deletes nothing — not the pending install either.
+    func testUnreleasedKeepsAPendingInstall() async throws {
+        let device = try Device(self)
+        device.server.publish(try Release.one())
+        _ = try await device.cycle().run()
+        let pending = await device.state.pending
+        XCTAssertNotNil(pending)
+        device.clock.advance(1800)
+        device.server.answerMeta(CycleFixtures.problem(404, code: "delivery.stage_unreleased", pollAfter: 600))
+        _ = try await device.cycle().run()
+        let state = await device.state
+        XCTAssertEqual(state.pending, pending)
+    }
+
+    private func release(pollAfter: Int, _ base: Release) -> Release {
+        Release(releaseId: base.releaseId, checksum: base.checksum, manifest: base.manifest,
+                metaBody: base.metaBody.merging(["pollAfter": pollAfter]) { $1 }, objects: base.objects)
+    }
+
+    /// `meta` flapping between two releases whose files are gone settles at the floor every time, never at zero.
+    func testAFlappingMetaNeverLoopsWithoutDelay() async throws {
+        let device = try Device(self)
+        let one = try Release.one()
+        let two = try one.changing(releaseId: 43, slots: [en: Data("\"a\" = \"2\";".utf8)])
+        device.server.publish(two, meta: false)
+        device.server.publish(one)
+        device.server.answerMeta(one.metaAnswer(), two.metaAnswer(), one.metaAnswer(), two.metaAnswer())
+        let gone = try DeliveryFixtures.error("object-403-cdn-edge")
+        device.server.answerObject(hash: try one.hash(of: en), fileType: "strings", gone, gone)
+        device.server.answerObject(hash: try two.hash(of: en), fileType: "strings", gone, gone)
+        let first = try await device.cycle().run()
+        XCTAssertGreaterThanOrEqual(first.nextCheckIn, 60)
+        let immediately = try await device.cycle().run()
+        XCTAssertEqual(immediately.outcome, .notDue)
+    }
+
+    /// A slot the Store will never write (an unsafe bundle id, a locale differing only in case) is not "missing":
+    /// no install is built for it, cycle after cycle.
+    func testASlotTheStoreCannotWriteIsNotMissingForever() async throws {
+        let device = try Device(self, locales: ["en", "EN"])
+        var bundles = try XCTUnwrap(JSONSerialization.jsonObject(with: Release.one().manifest) as? [String: Any])["bundles"] as! [String: Any]
+        bundles["com.app"] = ["type": "custom", "name": "dotted"]
+        let odd = Slot(bundleId: "com.app", locale: "en", fileType: "strings")
+        let twin = Slot(bundleId: "ns7", locale: "EN", fileType: "strings")
+        let release = try Release.one().changing(releaseId: 43, slots: [odd: Data("\"x\" = \"y\";".utf8), twin: Data("\"x\" = \"z\";".utf8)],
+                                                 fields: ["bundles": bundles])
+        device.server.publish(release)
+        try await device.runAndActivate()
+        for _ in 0..<2 {
+            device.clock.advance(1800)
+            let report = try await device.cycle().run()
+            XCTAssertEqual(report.outcome, .unchanged)
+        }
+    }
+
+    /// A 304 keeps the last `pollAfter` known; a configuration error takes the one in its body.
+    func testA304AndAConfigurationErrorKeepTheirCadence() async throws {
+        let device = try Device(self)
+        device.server.publish(release(pollAfter: 900, try Release.one()))
+        try await device.runAndActivate()
+        device.clock.advance(900)
+        device.server.answerMeta(FakeTransport.Answer(status: 304))
+        let notModified = try await device.cycle().run()
+        XCTAssertEqual(notModified.nextCheckIn, 900)
+        device.clock.advance(900)
+        device.server.answerMeta(CycleFixtures.problem(404, code: "delivery.track_not_found", pollAfter: 1200))
+        let missing = try await device.cycle().run()
+        XCTAssertEqual(missing.outcome, .configurationError(code: "delivery.track_not_found"))
+        XCTAssertEqual(missing.nextCheckIn, 1200)
+    }
+
+    /// No wait exceeds a day, whatever `pollAfter` says.
+    func testAHugePollAfterIsCappedAtADay() async throws {
+        let device = try Device(self)
+        device.server.publish(release(pollAfter: 10_000_000, try Release.one()))
+        let report = try await device.cycle().run()
+        XCTAssertEqual(report.nextCheckIn, 86_400)
+    }
+
+    /// A file that fails its hash is the server's content, not an expired signature: no `meta` re-read for it.
+    func testAHashMismatchDoesNotReReadMeta() async throws {
+        let device = try Device(self)
+        let release = try Release.one()
+        device.server.publish(release)
+        device.server.answerObject(hash: try release.hash(of: en), fileType: "strings", FakeTransport.Answer(status: 200, body: Data("tampered".utf8)))
+        let report = try await device.cycle().run()
+        guard case .installed(let install) = report.outcome else { return XCTFail("\(report)") }
+        XCTAssertEqual(install.owedSlots, [en])
+        XCTAssertEqual(device.server.metaRequests.count, 1)
+    }
+
+    /// Step A learning the stage moved on builds nothing for the release it left.
+    func testALanguageChangeAfterTheStageMovedBuildsNothing() async throws {
+        let device = try Device(self, locales: ["en"])
+        let one = try Release.one()
+        device.server.publish(one)
+        try await device.runAndActivate()
+        let two = try one.changing(releaseId: 43, slots: [en: Data("\"a\" = \"2\";".utf8)])
+        device.server.publish(two)
+        device.server.answerObject(hash: try one.hash(of: ar), fileType: "strings", try DeliveryFixtures.error("object-403-cdn-edge"))
+        device.selection.set(["en", "ar"])
+        let report = try await device.cycle().languageChanged()
+        if case .installed = report.outcome { XCTFail("built for the release the stage left") }
+        let state = await device.state
+        XCTAssertNil(state.pending)
+    }
+
+    /// A language change arriving during a cycle waits for it, then works on what the cycle left.
+    func testALanguageChangeWaitsForARunningCycle() async throws {
+        let device = try Device(self, locales: ["en"])
+        device.server.publish(try Release.one())
+        let cycle = try device.cycle()
+        async let poll = cycle.run()
+        device.selection.set(["en", "ar"])
+        async let change = cycle.languageChanged()
+        let (polled, changed) = await (poll, change)
+        guard case .installed = polled.outcome else { return XCTFail("\(polled)") }
+        let state = await device.state
+        let pending = try XCTUnwrap(state.pending)
+        if case .installed(let install) = changed.outcome {
+            XCTAssertEqual(install, pending)
+        }
+        XCTAssertNotNil(try device.file(pending, ar))
     }
 }
