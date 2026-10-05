@@ -2,7 +2,6 @@ import CryptoKit
 import Foundation
 
 enum StoreError: Error, Equatable {
-    case notImplemented
     /// A checksum, hash, file type, bundle id or locale that is not safe as a path component.
     case unsafeName(String)
     case hashMismatch
@@ -321,6 +320,34 @@ actor Store {
 
     /// Removes what nothing names; returns the removed paths relative to `<root>/Tarjim`.
     func cleanup() throws -> [String] {
-        throw StoreError.notImplemented
+        let tarjim = directory.deletingLastPathComponent().deletingLastPathComponent()
+        var removed: [String] = []
+        let keptInstalls = Set([state.active, state.previous, state.pending].compactMap { $0?.directory }).union(protectedDirectories)
+        let keptStaging = state.stagingChecksum
+
+        try remove(in: tarjim, keeping: ["v1"], from: tarjim, into: &removed)
+        try remove(in: tarjim.appendingPathComponent("v1"), keeping: [directory.lastPathComponent], from: tarjim, into: &removed)
+        try remove(in: directory.appendingPathComponent("installs"), keeping: keptInstalls, from: tarjim, into: &removed)
+        let staging = directory.appendingPathComponent("staging")
+        try remove(in: staging, keeping: keptStaging.map { [$0] } ?? [], from: tarjim, into: &removed)
+        if let keptStaging {
+            let builds = try entries(of: staging.appendingPathComponent(keptStaging)).filter { $0.hasPrefix("build-") }
+            try remove(in: staging.appendingPathComponent(keptStaging), keeping: Set(try entries(of: staging.appendingPathComponent(keptStaging))).subtracting(builds),
+                       from: tarjim, into: &removed)
+        }
+        return removed
+    }
+
+    private func entries(of directory: URL) throws -> [String] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted()
+    }
+
+    private func remove(in parent: URL, keeping kept: Set<String>, from base: URL, into removed: inout [String]) throws {
+        for name in try entries(of: parent) where !kept.contains(name) {
+            let url = parent.appendingPathComponent(name)
+            try FileManager.default.removeItem(at: url)
+            removed.append(String(url.standardizedFileURL.path.dropFirst(base.standardizedFileURL.path.count + 1)))
+        }
     }
 }
