@@ -224,7 +224,16 @@ final class Runtime: Sendable {
     }
 
     func setLanguage(_ identifier: String?) async {
-        await parts.engine?.setLanguageOverride(identifier)
+        guard let engine = parts.engine else {
+            // The launch that follows reads the stored choice.
+            do {
+                try await store.update { $0.languageOverride = identifier }
+            } catch {
+                Log.debug("The language choice could not be saved (\(error))")
+            }
+            return
+        }
+        await engine.setLanguageOverride(identifier)
     }
 
     func activatePendingUpdate() async -> Bool {

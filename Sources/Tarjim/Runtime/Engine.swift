@@ -109,12 +109,14 @@ actor Engine {
 
     /// Stores the language the app asked for (nil: follow the app's language again) and serves it if the release has it.
     func setLanguageOverride(_ identifier: String?) async {
-        await launchTask?.value
         do {
             try await environment.store.update { $0.languageOverride = identifier }
         } catch {
             Log.debug("The language choice could not be saved (\(error))")
         }
+        // Before launch has begun, launch reads the stored choice itself; acting here could activate ahead of the crash count.
+        guard let launchTask else { return }
+        await launchTask.value
         await selectionChanged()
     }
 
@@ -123,11 +125,16 @@ actor Engine {
         await launchTask?.value
         await refreshOverride()
         await exclusive { await rebuildSnapshot() }
+        await fetchSelectionIfNotHeld()
+    }
+
+    /// Fetches the selected locales when the active install holds none of them, and shows them at once.
+    private func fetchSelectionIfNotHeld(duringLaunch: Bool = false) async {
         let state = await environment.store.state
         guard let active = state.active, let selection = environment.snapshots.current.selection,
               !holds(active, locales: selection.locales, bundleIds: bundleIds(of: active)) else { return }
         let known = (state.pending ?? active).checksum
-        await handle(await cycle.languageChanged(), knownChecksum: known)
+        await handle(await cycle.languageChanged(), knownChecksum: known, keepingCrashCount: duringLaunch)
     }
 
     /// The process came to the foreground. The first time, for a process the system launched in the background, this
@@ -220,9 +227,12 @@ actor Engine {
             }
             await rebuildSnapshot()
         }
+        // A choice stored before this launch may name a language the active install lacks.
+        if foreground { await fetchSelectionIfNotHeld(duringLaunch: true) }
     }
 
-    private func activate(_ install: InstallRecord) async -> Bool {
+    /// `keepingCrashCount` is for the launch that counted a cut-short predecessor just before: that count stays.
+    private func activate(_ install: InstallRecord, keepingCrashCount: Bool = false) async -> Bool {
         let store = environment.store
         let current = await store.state
         // An install that is already the active one has nothing to show and must not restart its probation.
@@ -232,7 +242,7 @@ actor Engine {
         do {
             try await store.activate(install) { state in
                 state.probation = directory
-                state.launchCrashCount = 0
+                if !keepingCrashCount { state.launchCrashCount = 0 }
             }
         } catch { return false }
         // The new install's probation starts from zero, whatever this process has already spent in the foreground.
@@ -280,11 +290,11 @@ actor Engine {
         }
     }
 
-    private func handle(_ report: CycleReport, knownChecksum: String?) async {
+    private func handle(_ report: CycleReport, knownChecksum: String?, keepingCrashCount: Bool = false) async {
         guard case .installed(let install) = report.outcome else { return }
         if install.checksum != knownChecksum { box.send(.downloaded) }
         await exclusive {
-            if servesNothing() { _ = await activate(install) }
+            if servesNothing() { _ = await activate(install, keepingCrashCount: keepingCrashCount) }
         }
     }
 
