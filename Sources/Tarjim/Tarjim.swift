@@ -101,8 +101,11 @@ public enum Tarjim {
     /// Serves Tarjim text in `identifier` (a language the release has, such as "ar" or "pt-BR") instead of the app's
     /// language, and remembers the choice across launches; `nil` follows the app's language again. A language the release
     /// does not have is ignored — and kept, so it applies once a release adds it. Only Tarjim text changes: layout
-    /// direction, system text and number formats stay with the app's language.
-    public static func setLanguage(_ identifier: String?) async {}
+    /// direction, system text and number formats stay with the app's language. Call it after `start`; before that it
+    /// does nothing.
+    public static func setLanguage(_ identifier: String?) async {
+        await box.current?.setLanguage(identifier)
+    }
 
     /// Shows a downloaded update now instead of at the next cold start. Returns whether there was one to show.
     public static func activatePendingUpdate() async -> Bool {

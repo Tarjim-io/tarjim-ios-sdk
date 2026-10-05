@@ -108,7 +108,15 @@ actor Engine {
     }
 
     /// Stores the language the app asked for (nil: follow the app's language again) and serves it if the release has it.
-    func setLanguageOverride(_ identifier: String?) async {}
+    func setLanguageOverride(_ identifier: String?) async {
+        await launchTask?.value
+        do {
+            try await environment.store.update { $0.languageOverride = identifier }
+        } catch {
+            Log.debug("The language choice could not be saved (\(error))")
+        }
+        await selectionChanged()
+    }
 
     /// The selected locales may have changed: serve them if held, fetch them if the held manifest lists them.
     func selectionChanged() async {
