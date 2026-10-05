@@ -8,7 +8,7 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
 
 - Build: `swift build`
 - Test: `swift test --parallel`
-- Warnings as errors, as CI runs it: `swift build -Xswiftc -warnings-as-errors`
+- Warnings as errors, as CI runs it: `swift build --build-tests -Xswiftc -warnings-as-errors`
 - Simulator: `xcodebuild test -scheme Tarjim -destination "id=<simulator udid>"`
 - Test-report gate: `swift test --parallel --xunit-output <file>.xml`, then
   `scripts/verify-test-report.py --report <file>.xml ...` (see its docstring). `--parallel` is required,
