@@ -16,6 +16,23 @@ struct BundleEntry: Equatable, Sendable {
 
 enum BundleDirectory {
     static func id(for bundle: TarjimBundle, in entries: [BundleEntry]) -> String? {
-        nil
+        let (type, name) = switch bundle {
+        case .namespace(let name): ("namespace", name)
+        case .custom(let name): ("custom", name)
+        }
+        return entries
+            .filter { $0.type == type && $0.name == name }
+            .min { lowerId($0.id, than: $1.id) }?.id
+    }
+
+    // Numeric order so `ns7` precedes `ns10`; without digits (or on a tie) the plain string order decides.
+    private static func lowerId(_ a: String, than b: String) -> Bool {
+        if let x = trailingNumber(a), let y = trailingNumber(b), x != y { return x < y }
+        return a < b
+    }
+
+    private static func trailingNumber(_ id: String) -> Int? {
+        let digits = id.reversed().prefix { $0.isASCII && $0.isNumber }
+        return Int(String(digits.reversed()))
     }
 }
