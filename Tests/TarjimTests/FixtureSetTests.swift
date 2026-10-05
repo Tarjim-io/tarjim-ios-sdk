@@ -221,39 +221,71 @@ final class FixtureSetTests: XCTestCase {
         }
     }
 
+
     /// This repository is public: a recorded fixture must never carry a key, a live signature or a
     /// real hostname.
     func testNoFixtureCarriesAKeyASignatureOrARealHost() throws {
         let paths = try Fixtures.allFiles()
         XCTAssertGreaterThanOrEqual(paths.count, 20)
+        let envelopes = Set(try envelopePaths())
         for path in paths {
-            XCTAssertEqual(try PublicSafety.leaks(in: Fixtures.data(path)), [], path)
+            let kind: PublicSafety.Kind = envelopes.contains(path) ? .envelope : .content
+            XCTAssertEqual(try PublicSafety.leaks(in: Fixtures.data(path), kind: kind), [], path)
         }
     }
 
     func testLeakScanCatchesAKeyASignatureAndAHost() throws {
-        func leaks(_ text: String) throws -> [String] { try PublicSafety.leaks(in: Data(text.utf8)) }
-        XCTAssertEqual(try leaks(#"{"k":"tarjim-12-345-6-abcdef"}"#), ["API key"])
-        XCTAssertEqual(try leaks("Policy=eyJTdGF0&Signature=REDACTED"), ["signature Policy"])
-        XCTAssertEqual(try leaks("https://d1abc.cloudfront.net/releases/1/2/"), ["host d1abc.cloudfront.net"])
-        XCTAssertEqual(try leaks("https://staging.example.org/x"), ["host staging.example.org"])
-        XCTAssertEqual(try leaks("https://notexample.com/a.png"), ["host notexample.com"])
-        // Forms a recording really produces: escaped, encoded, bare, lower-case, subdomains of allowed hosts.
-        XCTAssertEqual(try leaks(#"{"detail":"upstream staging-api.corp-internal.net rejected"}"#), ["host staging-api.corp-internal.net"])
-        XCTAssertEqual(try leaks(#""https:\/\/d1abc.cloudfront.net\/x""#), ["host d1abc.cloudfront.net"])
-        XCTAssertEqual(try leaks("https%3A%2F%2Fd1abc.cloudfront.net%2Fx%3FSignature%3DLIVESIG"), ["signature Signature", "host d1abc.cloudfront.net"])
-        XCTAssertEqual(try leaks("https://zz-fixture-probe.api.tarjim.io/x"), ["host zz-fixture-probe.api.tarjim.io"])
-        XCTAssertEqual(try leaks(#"{"k":"tarjim-12-345-6-abcdef"}"#), ["API key"])
-        XCTAssertEqual(try leaks(#"Signature=LIVESIG"#), ["signature Signature"])
-        XCTAssertEqual(try leaks("policy=LIVE&signature=LIVE"), ["signature policy", "signature signature"])
-        XCTAssertEqual(try PublicSafety.leaks(in: Data([0xE9]) + Data(" https://d1abc.cloudfront.net/".utf8)), ["host d1abc.cloudfront.net"])
-        XCTAssertEqual(try leaks("see staging.acme.com for details"), ["host staging.acme.com"])
-        // Allowed.
-        XCTAssertEqual(try leaks("https://cdn.example.invalid/x?Policy=REDACTED&Signature=REDACTED&Key-Pair-Id=REDACTED"), [])
-        XCTAssertEqual(try leaks("https://api.tarjim.io/problems/not-found"), [])
-        XCTAssertEqual(try leaks("https://cdn.example.com/a.png"), [])
-        XCTAssertEqual(try leaks(#"<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">"#), [])
-        XCTAssertEqual(try leaks(#""app.title" = "Tarjim"; "files.owner" = "%1$@ has %2$d files";"#), [])
+        func envelope(_ text: String) throws -> Set<String> { Set(try PublicSafety.leaks(in: Data(text.utf8), kind: .envelope)) }
+        func content(_ text: String) throws -> Set<String> { Set(try PublicSafety.leaks(in: Data(text.utf8), kind: .content)) }
+        let liveSignature = "Pm9Yk3Q2bV8xLw0tR5nZcA"
+        // Built at runtime so no tool or editor can turn the JSON escapes below into plain characters.
+        let backslash = String(UnicodeScalar(92))
+
+        // Anywhere: keys, live signatures, hosts in URLs, IP addresses.
+        for scan in [envelope, content] {
+            XCTAssertEqual(try scan(#"{"k":"tarjim-12-345-6-abcdef"}"#), ["API key"])
+            XCTAssertEqual(try scan("Policy=\(liveSignature)&Signature=REDACTED"), ["signature Policy"])
+            XCTAssertEqual(try scan("https://d1abc.cloudfront.net/releases/1/2/"), ["host d1abc.cloudfront.net"])
+            XCTAssertEqual(try scan("https://staging.example.org/x"), ["host staging.example.org"])
+            XCTAssertEqual(try scan("https://notexample.com/a.png"), ["host notexample.com"])
+            XCTAssertEqual(try scan("https://zz-fixture-probe.api.tarjim.io/x"), ["host zz-fixture-probe.api.tarjim.io"])
+            XCTAssertEqual(try scan("connect 10.20.30.40:8443 failed"), ["host 10.20.30.40"])
+            // Escaped and encoded forms a recording really produces.
+            XCTAssertEqual(try scan(#""https:\/\/d1abc.cloudfront.net\/x""#), ["host d1abc.cloudfront.net"])
+            XCTAssertEqual(try scan(#"{"k":"tarjim"# + backslash + #"u002d12-345-6-abcdef"}"#), ["API key"])
+            XCTAssertEqual(try scan("Signature" + backslash + "u003d" + liveSignature), ["signature Signature"])
+            XCTAssertEqual(try scan("policy=\(liveSignature)&signature=\(liveSignature)"), ["signature policy", "signature signature"])
+            XCTAssertEqual(
+                try scan(#""%@ has 20% off" "https%3A%2F%2Fd1abc.cloudfront.net%2Fx%3FSignature%3D"# + liveSignature + #"""#),
+                ["signature Signature", "host d1abc.cloudfront.net"]
+            )
+        }
+        let latin1 = Data([0xE9]) + Data(" https://d1abc.cloudfront.net/".utf8)
+        XCTAssertEqual(try PublicSafety.leaks(in: latin1, kind: .content), ["host d1abc.cloudfront.net"])
+        let utf16 = try XCTUnwrap(#""u" = "https://d1abc.cloudfront.net/?Signature=\#(liveSignature)";"#.data(using: .utf16))
+        XCTAssertEqual(Set(try PublicSafety.leaks(in: utf16, kind: .content)), ["signature Signature", "host d1abc.cloudfront.net"])
+
+        // A response body names infrastructure in prose; any dotted name that is not a file is a host there.
+        XCTAssertEqual(try envelope(#"{"detail":"upstream staging-api.corp-internal.net rejected"}"#), ["host staging-api.corp-internal.net"])
+        XCTAssertEqual(try envelope(#"{"detail":"via staging-api.tarjim.app and ops.tarjim.lb, api.acme.de"}"#),
+                       ["host staging-api.tarjim.app", "host ops.tarjim.lb", "host api.acme.de"])
+        XCTAssertEqual(try envelope(#"{"detail":"Project not found","type":"https://api.tarjim.io/problems/not-found"}"#), [])
+        XCTAssertEqual(try envelope(#"{"manifestUrl":"released/42/manifest","note":"see manifest.json and Localizable.strings"}"#), [])
+
+        // Translation text is the customer's: dotted key names and brand prose are not hosts.
+        XCTAssertEqual(try content(#""user.info" = "x"; "error.internal" = "y"; "about.me" = "z"; "model.ai" = "w";"#), [])
+        XCTAssertEqual(try content(#""brand" = "Welcome to Tarjim.io — search google.com"; "v" = "v1.2.3.info";"#), [])
+        XCTAssertEqual(try content(#""cookie" = "Expires=never"; "terms" = "Privacy Policy=accepted";"#), [])
+
+        // Allowed everywhere.
+        for scan in [envelope, content] {
+            XCTAssertEqual(try scan("https://cdn.example.invalid/x?Policy=REDACTED&Signature=REDACTED&Key-Pair-Id=REDACTED"), [])
+            XCTAssertEqual(try scan("https://api.tarjim.io/problems/not-found"), [])
+            XCTAssertEqual(try scan("https://cdn.example.com/a.png"), [])
+            XCTAssertEqual(try scan(#"<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">"#), [])
+        }
+        XCTAssertEqual(try content(#""app.title" = "Tarjim"; "files.owner" = "%1$@ has %2$d files";"#), [])
+        XCTAssertEqual(try envelope(#"{"code":"delivery.disabled","status":503}"#), [])
     }
 
     private func envelopePaths() throws -> [String] {
@@ -263,40 +295,50 @@ final class FixtureSetTests: XCTestCase {
 }
 
 enum PublicSafety {
+    /// A response envelope is written by the server and may name its infrastructure in prose; content
+    /// (translation files, manifests) is the customer's text, where dotted words are ordinary.
+    enum Kind { case envelope, content }
+
     private static let allowedHosts = ["www.apple.com", "api.tarjim.io"]
     private static let allowedDomains = ["example.com", "invalid"]
-    private static let tlds = "com|net|org|io|dev|cloud|ai|co|me|info|biz|tech|site|xyz|internal|local|corp|lan|intranet|aws"
+    private static let fileExtensions: Set<String> = ["json", "strings", "stringsdict", "xml", "plist", "dtd", "html", "htm", "png", "jpg", "svg", "txt", "md"]
 
-    /// What in `bytes` must not reach a public repository: an API key, a signature value other than
-    /// `REDACTED`, or a host outside `*.invalid`, `*.example.com` and two exact hosts. The text is
-    /// also scanned with JSON and percent escapes undone, and bytes that are not UTF-8 are read as
-    /// Latin-1, so neither hides a match.
-    static func leaks(in bytes: Data) throws -> [String] {
-        let text = String(data: bytes, encoding: .utf8) ?? String(data: bytes, encoding: .isoLatin1)!
+    /// What in `bytes` must not reach a public repository: an API key, a live CloudFront signature
+    /// value, an IP address, or a host outside `*.invalid`, `*.example.com` and two exact hosts. The
+    /// text is also scanned with JSON and percent escapes undone; UTF-16 and non-UTF-8 bytes are
+    /// decoded rather than skipped.
+    static func leaks(in bytes: Data, kind: Kind) throws -> [String] {
+        let text = decode(bytes)
         let unescaped = unescapeJSON(text)
-        let variants = [text, unescaped, unescaped.removingPercentEncoding ?? unescaped]
-
         var found: [String] = []
         func add(_ item: String) {
             if !found.contains(item) { found.append(item) }
         }
-        for text in variants {
-            let range = NSRange(text.startIndex..., in: text)
+        for variant in [text, unescaped, percentDecoded(unescaped)] {
+            let range = NSRange(variant.startIndex..., in: variant)
             func capture(_ match: NSTextCheckingResult, _ group: Int) -> String {
-                String(text[Range(match.range(at: group), in: text)!])
+                String(variant[Range(match.range(at: group), in: variant)!])
             }
-            if try NSRegularExpression(pattern: #"tarjim-\d+-\d+-\d+-"#, options: [.caseInsensitive]).firstMatch(in: text, range: range) != nil {
+            func matches(_ pattern: String) throws -> [NSTextCheckingResult] {
+                try NSRegularExpression(pattern: pattern, options: [.caseInsensitive]).matches(in: variant, range: range)
+            }
+            if try !matches(#"tarjim-\d+-\d+-\d+-"#).isEmpty {
                 add("API key")
             }
-            let signature = try NSRegularExpression(pattern: #"\b(Policy|Signature|Key-Pair-Id|Expires)=([^&"\s\\]+)"#, options: [.caseInsensitive])
-            for match in signature.matches(in: text, range: range) where capture(match, 2) != "REDACTED" {
+            // Real values are long base64-ish strings (or a 10-digit epoch); `REDACTED` and prose are not.
+            for match in try matches(#"\b(Policy|Signature|Key-Pair-Id)=([A-Za-z0-9_~-]{12,})"#) + matches(#"\b(Expires)=(\d{9,})"#) {
                 add("signature \(capture(match, 1))")
             }
-            let withScheme = try NSRegularExpression(pattern: #"[a-z][a-z0-9+.-]*://([^/\s"'?#:\\%]+)"#, options: [.caseInsensitive])
-            let bare = try NSRegularExpression(pattern: #"(?<![\w.@%-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:\#(tlds)))(?![\w-])"#, options: [.caseInsensitive])
-            for match in withScheme.matches(in: text, range: range) + bare.matches(in: text, range: range) {
-                let host = capture(match, 1).lowercased()
-                if !isAllowed(host) { add("host \(host)") }
+            var hosts = try matches(#"[a-z][a-z0-9+.-]*://([^/\s"'?#:\\%]+)"#).map { capture($0, 1) }
+            hosts += try matches(#"(?<![\w.])((?:\d{1,3}\.){3}\d{1,3})(?![\w.])"#).map { capture($0, 1) }
+            if kind == .envelope {
+                hosts += try matches(#"(?<![\w.@%/-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24})(?![\w-])"#)
+                    .map { capture($0, 1) }
+                    .filter { !fileExtensions.contains(String($0.split(separator: ".").last!).lowercased()) }
+                    .filter { !$0.lowercased().hasPrefix("delivery.") }  // problem codes, e.g. `delivery.disabled`
+            }
+            for host in hosts.map({ $0.lowercased() }) where !isAllowed(host) {
+                add("host \(host)")
             }
         }
         return found
@@ -304,6 +346,13 @@ enum PublicSafety {
 
     private static func isAllowed(_ host: String) -> Bool {
         allowedHosts.contains(host) || allowedDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    private static func decode(_ bytes: Data) -> String {
+        if bytes.starts(with: [0xFF, 0xFE]) || bytes.starts(with: [0xFE, 0xFF]), let text = String(data: bytes, encoding: .utf16) {
+            return text
+        }
+        return String(data: bytes, encoding: .utf8) ?? String(data: bytes, encoding: .isoLatin1)!
     }
 
     private static func unescapeJSON(_ text: String) -> String {
@@ -315,6 +364,20 @@ enum PublicSafety {
             if let scalar = UInt32(hex, radix: 16).flatMap(Unicode.Scalar.init) {
                 result.replaceSubrange(range, with: String(Character(scalar)))
             }
+        }
+        return result
+    }
+
+    /// Decodes each run of valid `%XX` escapes and leaves everything else, so a stray `%@` or `20%`
+    /// elsewhere in the file cannot stop the decoding (Foundation's decoder gives up on the whole string).
+    private static func percentDecoded(_ text: String) -> String {
+        var result = text
+        let runs = try! NSRegularExpression(pattern: #"(?:%[0-9A-Fa-f]{2})+"#)
+        for match in runs.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed() {
+            let range = Range(match.range, in: result)!
+            let hex = result[range].split(separator: "%").compactMap { UInt8($0, radix: 16) }
+            let decoded = String(data: Data(hex), encoding: .utf8) ?? String(data: Data(hex), encoding: .isoLatin1)!
+            result.replaceSubrange(range, with: decoded)
         }
         return result
     }
