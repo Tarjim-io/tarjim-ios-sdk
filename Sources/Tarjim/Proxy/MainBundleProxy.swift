@@ -9,6 +9,8 @@ enum MainBundleProxy {
     struct DownloadedText {
         let value: String
         let source: Bundle
+        /// The table the value was read from; nil for a downloaded folder, which only has `Localizable`.
+        var table: String? = nil
     }
 
     /// What the resolver decided for a lookup.
@@ -153,7 +155,7 @@ enum MainBundleProxy {
         guard let imp = class_getMethodImplementation(object_getClass(hit.source), attributedSelector) else {
             return NSAttributedString(string: hit.value)
         }
-        return unsafeBitCast(imp, to: AttributedLookup.self)(hit.source, attributedSelector, key, nil, nil)
+        return unsafeBitCast(imp, to: AttributedLookup.self)(hit.source, attributedSelector, key, nil, hit.table as NSString?)
     }
 }
 
@@ -183,7 +185,7 @@ extension Resolver {
             if lproj === resolved { later = true; continue }
             let value = found(lproj, key, table: table)
             guard let value else { continue }
-            let text = MainBundleProxy.DownloadedText(value: value, source: lproj)
+            let text = MainBundleProxy.DownloadedText(value: value, source: lproj, table: table)
             return later ? .appFirst(text) : .downloaded(text)
         }
         return nil
