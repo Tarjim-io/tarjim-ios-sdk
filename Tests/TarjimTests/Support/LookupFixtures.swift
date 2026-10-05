@@ -5,10 +5,10 @@ import XCTest
 /// An install directory built from the release-1 objects, and a stand-in for the app's own bundle.
 enum LookupFixtures {
     static let entries = [
-        BundleEntry(id: "ns7", type: "namespace", name: "default"),
-        BundleEntry(id: "ns12", type: "namespace", name: "checkout"),
-        BundleEntry(id: "ns15", type: "namespace", name: "onboarding"),
-        BundleEntry(id: "b3", type: "custom", name: "checkout-screen"),
+        ManifestBundle(id: "ns7", type: "namespace", name: "default"),
+        ManifestBundle(id: "ns12", type: "namespace", name: "checkout"),
+        ManifestBundle(id: "ns15", type: "namespace", name: "onboarding"),
+        ManifestBundle(id: "b3", type: "custom", name: "checkout-screen"),
     ]
 
     static func temporaryDirectory(for test: XCTestCase) throws -> URL {
@@ -66,7 +66,7 @@ enum LookupFixtures {
         AppResources(bundle: try appBundle(for: test), language: language)
     }
 
-    static func resolver(app: AppResources, install: URL?, selection: LocaleSelection?, entries: [BundleEntry] = entries,
+    static func resolver(app: AppResources, install: URL?, selection: LocaleSelection?, entries: [ManifestBundle] = entries,
                          defaultBundle: TarjimBundle = .namespace("default")) -> Resolver {
         let snapshot = Snapshot(installDirectory: install, entries: entries, selection: selection)
         return Resolver(app: app, defaultBundle: defaultBundle, snapshot: { snapshot })

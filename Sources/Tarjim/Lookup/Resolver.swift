@@ -5,10 +5,10 @@ final class Snapshot: Sendable {
     static let empty = Snapshot(installDirectory: nil, entries: [], selection: nil)
 
     let installDirectory: URL?
-    let entries: [BundleEntry]
+    let entries: [ManifestBundle]
     let selection: LocaleSelection?
 
-    init(installDirectory: URL?, entries: [BundleEntry], selection: LocaleSelection?) {
+    init(installDirectory: URL?, entries: [ManifestBundle], selection: LocaleSelection?) {
         self.installDirectory = installDirectory
         self.entries = entries
         self.selection = selection
