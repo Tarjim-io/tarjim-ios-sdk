@@ -40,7 +40,9 @@ Planned components:
 - Tests first. A test must be seen failing for the right reason before the code that satisfies it.
 - Fixtures are recorded or hand-built and never edited after recording; editing breaks the hashes. If the
   leak scan flags a recording, re-capture it from another project.
-- Commit messages are one line, at most 50 characters, `type(scope): description`, with no trailers.
+- A commit message is a single line — no body, no trailers such as `Co-Authored-By` — at most
+  50 characters, `type(scope): description`.
+- Pull requests follow `.claude/skills/pr/SKILL.md`; `.github/PULL_REQUEST_TEMPLATE.md` mirrors it.
 - Never set `Accept-Encoding`; let the URL loading system negotiate and decode.
 - The API key only travels in the `X-Tarjim-Apikey` header and never reaches a log line or a report.
 - All logging goes through one call site, at `debug` level.
