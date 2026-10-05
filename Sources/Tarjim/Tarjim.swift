@@ -63,9 +63,11 @@ public enum Tarjim {
         do {
             runtime = try Runtime(configuration: configuration, environment: environment)
         } catch {
-            let message = "Tarjim.start ignored: the host is not a valid server address (\(error))"
+            let message = "Tarjim.start ignored: \(error)"
             Log.debug(message)
-            assertionFailure(message)
+            if error as? DeliveryEndpoint.Error == .invalidHost {
+                assertionFailure("Tarjim.start ignored: the host is not a valid server address")
+            }
             return
         }
         guard box.install(runtime) else { return }
