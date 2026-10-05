@@ -32,9 +32,9 @@ final class StoreInstallTests: XCTestCase {
         _ = try await installed(store, "a", [slot: one])
         let kept = try await installed(store, "b", [slot: two])
         try await store.activate(kept)
-        _ = try await store.cleanup()
-        XCTAssertFalse(StoreFixtures.exists(store.directory.appendingPathComponent("installs/1-aaaaaaaa")))
         let relaunched = try StoreFixtures.store(root)
+        _ = try await relaunched.cleanup()
+        XCTAssertFalse(StoreFixtures.exists(store.directory.appendingPathComponent("installs/1-aaaaaaaa")))
         let third = try await installed(relaunched, "c", [slot: three])
         XCTAssertEqual(third.directory, "3-cccccccc")
     }

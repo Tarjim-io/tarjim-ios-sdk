@@ -15,14 +15,17 @@ final class StoreRecoveryTests: XCTestCase {
         return try await store.makeInstall(plan)
     }
 
-    /// The cleanup after `start()` may run between building an install and recording it.
+    /// The cleanup after `start()` may run between building an install and recording it — also while ANOTHER
+    /// install is recorded in between.
     func testANewInstallSurvivesACleanupBeforeItIsRecorded() async throws {
         let root = try StoreFixtures.root(for: self)
         let store = try StoreFixtures.store(root)
         let install = try await installed(store, "a", [slot: one])
+        let other = try await installed(store, "b", [slot: two])
+        try await store.activate(other)
         _ = try await store.cleanup()
         XCTAssertTrue(StoreFixtures.exists(store.url(of: install)))
-        try await store.activate(install)
+        try await store.setPending(install)
         XCTAssertNotNil(store.fileURL(of: install, slot: slot))
     }
 
@@ -291,12 +294,13 @@ final class StoreRecoveryTests: XCTestCase {
         let first = try await installed(store, "a", [slot: one])
         let second = try await installed(store, "b", [slot: two])
         try await store.activate(second)
-        _ = try await store.cleanup()
+        let relaunched = try StoreFixtures.store(root)
+        _ = try await relaunched.cleanup()
         XCTAssertFalse(StoreFixtures.exists(store.url(of: first)))
-        var rolledBack = await store.state
+        var rolledBack = await relaunched.state
         rolledBack.nextInstallNumber = 1
-        try await store.save(rolledBack)
-        let third = try await installed(store, "a", [slot: one])
+        try await relaunched.save(rolledBack)
+        let third = try await installed(relaunched, "a", [slot: one])
         XCTAssertNotEqual(third.directory, first.directory)
     }
 
