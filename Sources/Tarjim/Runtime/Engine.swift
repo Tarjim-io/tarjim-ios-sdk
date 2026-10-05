@@ -145,7 +145,10 @@ actor Engine {
     }
 
     func activatePendingUpdate() async -> Bool {
-        await launchTask?.value
+        // Before the launch has begun it would run ahead of the crash count and could hide a revert; the launch
+        // itself shows a pending install.
+        guard let launchTask else { return false }
+        await launchTask.value
         return await exclusive {
             guard let pending = await environment.store.state.pending else { return false }
             return await activate(pending)
