@@ -109,9 +109,17 @@ extension LocaleSelector {
         "zh": ["TW": "Hant", "HK": "Hant", "MO": "Hant"],
         "yue": ["CN": "Hans"],
         "sr": ["ME": "Latn"],
-        "uz": ["AF": "Arab"],
         "pa": ["PK": "Aran"],
         "az": ["IR": "Arab"],
+        "ku": ["IQ": "Arab", "IR": "Arab"],
+        "ha": ["SD": "Arab"],
+        "ms": ["CC": "Arab"],
+        "kk": ["CN": "Arab"],
+        "ky": ["CN": "Arab"],
+        "tg": ["PK": "Arab"],
+        "mn": ["CN": "Mong"],
+        "uz": ["AF": "Arab", "CN": "Cyrl"],
+        "sd": ["IN": "Deva"],
     ]
 
     private static let defaultScripts: [String: String] = {
@@ -122,11 +130,11 @@ extension LocaleSelector {
             "mk": "Cyrl", "he": "Hebr", "yi": "Hebr", "ja": "Jpan", "ko": "Kore", "el": "Grek", "hi": "Deva",
             "mr": "Deva", "ne": "Deva", "th": "Thai", "bn": "Beng", "ta": "Taml", "te": "Telu", "kn": "Knda",
             "ml": "Mlym", "gu": "Gujr", "si": "Sinh", "my": "Mymr", "km": "Khmr", "lo": "Laoo", "ka": "Geor",
-            "hy": "Armn", "am": "Ethi", "ti": "Ethi", "bo": "Tibt",
+            "hy": "Armn", "vai": "Vaii", "shi": "Tfng", "am": "Ethi", "ti": "Ethi", "bo": "Tibt",
         ]
         for language in ["en", "fr", "de", "es", "it", "pt", "nl", "sv", "nb", "da", "fi", "pl", "cs", "sk", "hu", "ro",
                          "tr", "id", "vi", "ca", "hr", "sl", "lt", "lv", "et", "bs", "ms", "ha", "fil", "sw", "af",
-                         "sq", "is", "ga", "cy", "eu", "gl", "mt", "zu", "xh", "yo", "ig"] {
+                         "sq", "is", "ga", "cy", "eu", "gl", "mt", "zu", "xh", "yo", "ig", "ku", "ff", "lb", "rm", "fo"] {
             table[language] = "Latn"
         }
         return table
