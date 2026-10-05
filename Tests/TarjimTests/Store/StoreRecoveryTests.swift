@@ -321,4 +321,71 @@ final class StoreRecoveryTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 3)
         XCTAssertEqual(install.owedSlots, [])
     }
+
+    /// What `heldObject` calls held must be what `makeInstall` would install, or the cycle never fetches it again.
+    func testADamagedStagedFileIsNotHeld() async throws {
+        let root = try StoreFixtures.root(for: self)
+        let store = try StoreFixtures.store(root)
+        let plan = StoreFixtures.plan(checksum: "a", files: [slot: one])
+        try await StoreFixtures.stage(store, plan, [slot: one])
+        let staged = store.directory.appendingPathComponent("staging/\(plan.checksum)/\(Fixtures.sha256Hex(one)).strings")
+        try one.prefix(3).write(to: staged)
+        let held = await store.heldObject(hash: Fixtures.sha256Hex(one), fileType: "strings")
+        XCTAssertNil(held)
+        try await store.stage(checksum: plan.checksum, hash: Fixtures.sha256Hex(one), fileType: "strings", verifiedBytes: one)
+        let install = try await store.makeInstall(plan)
+        XCTAssertEqual(install.owedSlots, [], "a fresh stage replaces the damaged file")
+    }
+
+    /// Only a written file claims its path: a slot with nothing to write must not push out one that has bytes.
+    func testACaseTwinWithoutBytesDoesNotDisplaceOneWithBytes() async throws {
+        let root = try StoreFixtures.root(for: self)
+        let store = try StoreFixtures.store(root)
+        let lower = StoreFixtures.slot("ns7", "en", "strings")
+        let upper = StoreFixtures.slot("ns7", "EN", "strings")
+        let plan = StoreFixtures.plan(checksum: "a", files: [lower: one, upper: two])
+        try await StoreFixtures.stage(store, plan, [lower: one])
+        let install = try await store.makeInstall(plan)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(store.fileURL(of: install, slot: lower))), one)
+        XCTAssertFalse(install.owedSlots.contains(lower))
+    }
+
+    /// The cycle asks about every wanted object; the answer must not rescan the store each time.
+    func testHeldObjectIsCheapWithManyInstalls() async throws {
+        let root = try StoreFixtures.root(for: self)
+        let store = try StoreFixtures.store(root)
+        var files: [Slot: Data] = [:]
+        for index in 0..<200 { files[StoreFixtures.slot("ns\(index)", "en", "strings")] = Data("\"k\" = \"\(index)\";".utf8) }
+        for checksum: Character in ["a", "b", "c", "d", "e"] {
+            let plan = StoreFixtures.plan(checksum: checksum, files: files)
+            try await StoreFixtures.stage(store, plan, files)
+            try await store.activate(try await store.makeInstall(plan))
+        }
+        let hashes = files.values.map { Fixtures.sha256Hex($0) }
+        let started = Date()
+        for round in 0..<5 {
+            for hash in hashes {
+                let held = await store.heldObject(hash: hash, fileType: "strings")
+                XCTAssertNotNil(held, "\(round)")
+            }
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.0)
+    }
+
+    /// `save` applies the same checks as loading: an unsafe name never reaches cleanup or a copy.
+    func testSaveDropsUnsafeNamesToo() async throws {
+        let root = try StoreFixtures.root(for: self)
+        let store = try StoreFixtures.store(root)
+        let outside = root.appendingPathComponent("outside/build-9", isDirectory: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        var state = StoreState(sdkVersion: StoreFixtures.sdkVersion)
+        state.stagingChecksum = "../../../../outside"
+        state.active = InstallRecord(directory: "../../../../outside", checksum: String(repeating: "a", count: 64), releaseId: nil, owedSlots: [])
+        try await store.save(state)
+        let saved = await store.state
+        XCTAssertNil(saved.stagingChecksum)
+        XCTAssertNil(saved.active)
+        _ = try await store.cleanup()
+        XCTAssertTrue(StoreFixtures.exists(outside))
+    }
 }

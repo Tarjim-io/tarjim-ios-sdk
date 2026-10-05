@@ -80,10 +80,14 @@ final class StoreCleanupTests: XCTestCase {
         let root = try StoreFixtures.root(for: self)
         let store = try StoreFixtures.store(root)
         let served = try await installed(store, "a")
+        try await store.activate(served)
+        for next: Character in ["b", "c"] {
+            try await store.activate(try await installed(store, next))
+        }
         await store.protect(served)
         let removed = try await store.cleanup()
-        XCTAssertEqual(removed, [])
-        XCTAssertTrue(StoreFixtures.exists(store.url(of: served)))
+        XCTAssertFalse(removed.contains { $0.hasSuffix("installs/\(served.directory)") }, "\(removed)")
+        XCTAssertTrue(StoreFixtures.exists(store.url(of: served)), "no longer named by state.json, still read by the snapshot")
     }
 
     func testCleanupOfATidyStoreRemovesNothing() async throws {
