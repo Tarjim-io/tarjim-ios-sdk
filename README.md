@@ -62,6 +62,9 @@ Tarjim.string("pay.button", bundle: .namespace("checkout"))
 The order is always: the downloaded text, the app's own text, the key. Each string is formatted with the locale it
 was found in, so plurals and digits follow the text.
 
+Text is shown as written. One difference to know: SwiftUI `Text("key")` reached through the proxy renders Markdown in the
+text (`**bold**`), as Apple does for its own strings, while `Tarjim.string` returns the characters verbatim.
+
 Not reached by the proxy — use `Tarjim.string` there: a view under an explicit `.environment(\.locale, …)`,
 `String(localized:)` / `LocalizedStringResource`, `CFBundleCopyLocalizedString`, and SwiftUI interpolation of a
 plural (`Text("cart.items \(n)")` looks up `cart.items %lld`). Set `interceptsMainBundle = false` to turn the proxy off.
@@ -110,7 +113,9 @@ reported. Nothing is sent over the network; without a handler a line goes to the
 The SDK ships a privacy manifest. It does not track. Update checks carry a `User-Agent` naming the SDK version, the
 app version, the iOS version and the app's language, plus — unless `sendsInstallIdentifier = false` — a random
 identifier the SDK creates per install (new on reinstall and when the key changes), so active installs can be
-counted. Downloads from the CDN carry no header of the SDK's own; the system's default `User-Agent` still goes out.
+counted. Downloads from the CDN carry no header of the SDK's own; the system's default `User-Agent` still goes out. The
+language in the `User-Agent` is the app's language, fixed when the SDK starts; it does not follow `setLanguage` or the
+fallback language.
 
 ## Licence
 
