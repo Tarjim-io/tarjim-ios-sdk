@@ -2,13 +2,13 @@
 
 The runtime half of the Tarjim iOS SDK. It downloads a project's released translation files, verifies
 them, installs them atomically and answers string lookups. Swift Package, source only, iOS 15+,
-Swift 5.9+ and clean in Swift 6 mode. MIT licensed. Versions stay `0.x` until the first public release.
+a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Versions stay `0.x` until the first public release.
 
 ## Commands
 
 - Build: `swift build`
 - Test: `swift test --parallel`
-- Swift 6 mode: `swift test --parallel -Xswiftc -swift-version -Xswiftc 6`
+- Warnings as errors, as CI runs it: `swift build -Xswiftc -warnings-as-errors`
 - Simulator: `xcodebuild test -scheme Tarjim -destination "id=<simulator udid>"`
 - Test-report gate: `swift test --parallel --xunit-output <file>.xml`, then
   `scripts/verify-test-report.py --report <file>.xml ...` (see its docstring). `--parallel` is required,
@@ -18,8 +18,8 @@ Swift 5.9+ and clean in Swift 6 mode. MIT licensed. Versions stay `0.x` until th
 ## Layout
 
 - `Sources/Tarjim`: the SDK.
-- `Tests/TarjimTests`: tests; `Tests/TarjimTests/Fixtures` holds recorded or hand-built server answers
-  (see the README there).
+- `Tests/TarjimTests`: tests; `Tests/TarjimTests/Fixtures` holds hand-built server answers and, under
+  `recorded/<name>/`, recordings (see the README there).
 - `scripts`: capture and test-report tooling.
 
 Planned components:
