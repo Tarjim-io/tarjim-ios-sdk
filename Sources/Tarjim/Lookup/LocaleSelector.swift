@@ -58,7 +58,7 @@ enum LocaleSelector {
             let maximal = Locale.Language(identifier: language.maximalIdentifier)
             return (language.languageCode?.identifier, maximal.script?.identifier)
         }
-        let components = Locale.components(fromIdentifier: canonical.replacingOccurrences(of: "-", with: "_"))
+        let components = NSLocale.components(fromLocaleIdentifier: canonical.replacingOccurrences(of: "-", with: "_"))
         return (components[NSLocale.Key.languageCode.rawValue], components[NSLocale.Key.scriptCode.rawValue])
     }
 }
