@@ -16,7 +16,7 @@ struct URLSessionTransport: Transport {
     /// `configuration` lets a test install a stub `URLProtocol`; the session's policies (no
     /// redirects) apply regardless of the configuration given.
     init(configuration: URLSessionConfiguration) {
-        session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)
     }
 
     static func makeConfiguration() -> URLSessionConfiguration {
@@ -34,5 +34,19 @@ struct URLSessionTransport: Transport {
             throw URLError(.badServerResponse)
         }
         return (data, http)
+    }
+}
+
+/// URLSession would follow a 3xx and copy the request's headers, `X-Tarjim-Apikey` included, onto
+/// the `Location` host. Answering `nil` hands the 3xx back as the response instead.
+private final class RefuseRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
