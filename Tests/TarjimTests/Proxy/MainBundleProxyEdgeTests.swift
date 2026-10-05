@@ -178,4 +178,18 @@ final class MainBundleProxyEdgeTests: XCTestCase {
         XCTAssertEqual(bundle.localizedString(forKey: "count.only", value: nil, table: nil), "%d left", "not in ar.lproj: the app as resolved")
         XCTAssertEqual(CountingBundle.count, 1)
     }
+
+    /// SwiftUI's `Text(key, tableName:)` reads the same table as `NSLocalizedString(key, tableName:)`, also when the
+    /// answer comes from the app's own folder for the selected locale.
+    func testTheAttributedLookupKeepsTheTable() throws {
+        let bundle = try LookupFixtures.appBundle(for: self, extra: ["ar.lproj/checkout.strings": "\"app.only\" = \"دفع التطبيق\";"])
+        let resolver = LookupFixtures.resolver(app: AppResources(bundle: bundle, language: "en"), install: try LookupFixtures.install(for: self),
+                                               selection: LocaleSelection(kind: .user, locales: ["ar"]))
+        XCTAssertTrue(MainBundleProxy.install(on: bundle) { key, table in resolver.downloaded(key, table: table) })
+        typealias Lookup = @convention(c) (AnyObject, Selector, NSString, NSString?, NSString?) -> NSAttributedString
+        let selector = NSSelectorFromString("localizedAttributedStringForKey:value:table:")
+        let attributed = unsafeBitCast(bundle.method(for: selector), to: Lookup.self)(bundle, selector, "app.only", nil, "checkout").string
+        XCTAssertEqual(bundle.localizedString(forKey: "app.only", value: nil, table: "checkout"), "دفع التطبيق")
+        XCTAssertEqual(attributed, "دفع التطبيق")
+    }
 }
