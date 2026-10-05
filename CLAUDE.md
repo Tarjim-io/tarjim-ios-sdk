@@ -17,15 +17,15 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
 
 ## Layout
 
-- `Sources/Tarjim`: the SDK.
+- `Sources/Tarjim`: the SDK. `Delivery/` is the network layer: `DeliveryClient` (meta, manifest and
+  object requests, both delivery modes, every answer a typed outcome), `Verifier` (SHA-256),
+  `URLSessionTransport` (one ephemeral session, no cache, no cookies, redirects refused).
 - `Tests/TarjimTests`: tests; `Tests/TarjimTests/Fixtures` holds hand-built server answers and, under
   `recorded/<name>/`, recordings (see the README there).
 - `scripts`: capture and test-report tooling.
 
-Planned components:
+Planned components (not built yet):
 
-- `DeliveryClient`: requests, both delivery modes.
-- `Verifier`: sha256 checks.
 - `Store`: the only code that writes files; immutable install directories.
 - `Scheduler`: when to check for updates; foreground only.
 - `LocaleSelector`: picks the locale to serve.
