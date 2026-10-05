@@ -360,4 +360,73 @@ final class EngineEdgeTests: XCTestCase {
         let state = await process.state
         XCTAssertNotNil(state.pending)
     }
+
+    private func oneActiveTwoPending(_ process: AppProcess) async throws {
+        process.server.publish(try Release.one())
+        await process.engine.launch(foreground: true)
+        await process.engine.check()
+        await process.engine.foregroundElapsed(Engine.probationSeconds)
+        process.server.publish(try EngineFixtures.release(title: "Tarjim 2", releaseId: 43))
+        process.clock.advance(1800)
+        await process.engine.check()
+    }
+
+    /// Two callers activating at once: one activation, one event.
+    func testSimultaneousActivationsAnnounceOnce() async throws {
+        for _ in 0..<10 {
+            let process = try AppProcess(self)
+            try await oneActiveTwoPending(process)
+            let updates = process.recordUpdates()
+            let engine = process.engine!
+            async let first = engine.activatePendingUpdate()
+            async let second = engine.activatePendingUpdate()
+            let results = await [first, second]
+            await EngineFixtures.settle()
+            XCTAssertEqual(results.filter { $0 }.count, 1)
+            XCTAssertEqual(updates.value, [.activated])
+        }
+    }
+
+    /// A newly activated install starts with no crashes counted against it.
+    func testAnActivationStartsACleanCount() async throws {
+        let process = try AppProcess(self)
+        try await oneActiveTwoPending(process)
+        var state = await process.state
+        state.launchCrashCount = 1
+        try await process.store.save(state)
+        _ = await process.engine.activatePendingUpdate()
+        state = await process.state
+        XCTAssertEqual(state.launchCrashCount, 0)
+        XCTAssertEqual(state.probation, state.active?.directory)
+    }
+
+    /// Foreground time counted while an activation happens never closes the new install's probation.
+    func testForegroundTimeDuringAnActivationDoesNotCloseItsProbation() async throws {
+        for _ in 0..<20 {
+            let process = try AppProcess(self)
+            try await oneActiveTwoPending(process)
+            let engine = process.engine!
+            async let activated = engine.activatePendingUpdate()
+            async let ticked: Void = engine.foregroundElapsed(1)
+            _ = await (activated, ticked)
+            let state = await process.state
+            XCTAssertEqual(state.probation, state.active?.directory)
+        }
+    }
+
+    /// Before launch, a check and foreground time do nothing: launch decides what is shown and what is counted.
+    func testNothingHappensBeforeLaunch() async throws {
+        let process = try AppProcess(self)
+        process.server.publish(try Release.one())
+        await process.engine.launch(foreground: true)
+        await process.engine.check()
+        try process.relaunch()
+        process.clock.advance(1800)
+        let report = await process.engine.check()
+        XCTAssertEqual(report.outcome, .notDue)
+        XCTAssertEqual(process.server.metaRequests.count, 1, "only the first process's check")
+        await process.engine.foregroundElapsed(Engine.probationSeconds)
+        let state = await process.state
+        XCTAssertNotNil(state.probation, "still open: the previous process's launch has not been counted yet")
+    }
 }
