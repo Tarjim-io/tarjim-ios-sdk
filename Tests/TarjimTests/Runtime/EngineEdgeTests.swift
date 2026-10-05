@@ -344,4 +344,20 @@ final class EngineEdgeTests: XCTestCase {
         await process.engine.check()
         XCTAssertEqual(process.string("app.title"), "ترجم")
     }
+
+    /// Before launch has begun, nothing is activated out of turn: launch itself shows a pending install.
+    func testActivatingBeforeLaunchDoesNothing() async throws {
+        let process = try AppProcess(self)
+        process.server.publish(try Release.one())
+        await process.engine.launch(foreground: true)
+        await process.engine.check()
+        process.server.publish(try EngineFixtures.release(title: "Tarjim 2", releaseId: 43))
+        process.clock.advance(1800)
+        await process.engine.check()
+        try process.relaunch()
+        let activated = await process.engine.activatePendingUpdate()
+        XCTAssertFalse(activated)
+        let state = await process.state
+        XCTAssertNotNil(state.pending)
+    }
 }
