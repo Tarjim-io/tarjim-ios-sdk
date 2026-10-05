@@ -14,7 +14,12 @@ struct URLSessionTransport: Transport {
     }
 
     static func makeConfiguration() -> URLSessionConfiguration {
-        URLSessionConfiguration.default
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        return configuration
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {

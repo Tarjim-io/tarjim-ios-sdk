@@ -56,3 +56,11 @@ struct SliceEntry: Decodable, Sendable, Equatable {
     var size: Int
     var transferSize: Int
 }
+
+extension Meta: CustomStringConvertible, CustomDebugStringConvertible {
+    var description: String {
+        "Meta(checksum: \(checksum), releaseId: \(releaseId.map(String.init) ?? "nil"), mode: \(authenticated ? "origin" : "cdn"))"
+    }
+
+    var debugDescription: String { description }
+}
