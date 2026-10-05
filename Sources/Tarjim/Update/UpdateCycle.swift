@@ -124,6 +124,8 @@ private struct Verdict {
     var held: Signature?
     var rejected: String?
     var pollAfter: Int?
+    /// The failure streak is neither extended nor ended.
+    var keepsStep = false
 }
 
 /// A manifest read once: the listed files and the slots to hold, computed a single time per cycle.
@@ -226,7 +228,7 @@ extension UpdateCycle {
         switch verdict.finish {
         case let .settled(outcome, settledInterval):
             interval = Bounds.interval(settledInterval)
-            state.backoffStep = 0
+            if !verdict.keepsStep { state.backoffStep = 0 }
             let delay = min(Schedule.pollDelay(pollAfter: interval, random: environment.random()), TimeInterval(Bounds.day))
             report = CycleReport(outcome: outcome, nextCheckIn: delay)
         case let .backoff(retryAfter):
@@ -316,9 +318,10 @@ extension UpdateCycle {
         return await build(layout, checksum: newest.checksum, releaseId: signature.meta.releaseId, signature: signature, interval: interval)
     }
 
-    /// C14: `meta` moved on while this cycle worked, so nothing is recorded and the next check is now.
+    /// C14: `meta` moved on while this cycle worked, so nothing is recorded. The floor, not zero, so that a `meta`
+    /// flapping between releases cannot loop without delay.
     private func supersededVerdict() -> Verdict {
-        Verdict(finish: .settled(.unchanged, interval: 0))
+        Verdict(finish: .settled(.unchanged, interval: 60), keepsStep: true)
     }
 
     // MARK: Step A (I30)
@@ -375,11 +378,14 @@ extension UpdateCycle {
         }
         let selected = environment.selectLocales(Set(manifest.slices.values.flatMap(\.keys)).sorted())
         var wanted: [Slot] = []
+        // A case-insensitive volume would give a twin the same file as the first; the first in sorted order wins.
+        var seen: Set<Slot> = []
         for bundle in manifest.bundles.keys.sorted() {
             for locale in selected {
                 for fileType in ["strings", "stringsdict"] {
                     let slot = Slot(bundleId: bundle, locale: locale, fileType: fileType)
-                    if entries[slot] != nil { wanted.append(slot) }
+                    let folded = Slot(bundleId: bundle.lowercased(), locale: locale.lowercased(), fileType: fileType)
+                    if entries[slot] != nil, Store.canInstall(slot), seen.insert(folded).inserted { wanted.append(slot) }
                 }
             }
         }
@@ -393,7 +399,8 @@ extension UpdateCycle {
     }
 
     private func missingSlots(_ layout: Layout, in install: InstallRecord) -> [Slot] {
-        layout.wanted.filter { environment.store.fileURL(of: install, slot: $0) == nil }
+        // An owed slot may carry the active install's older file, so having a file does not mean it is held.
+        layout.wanted.filter { install.owedSlots.contains($0) || environment.store.fileURL(of: install, slot: $0) == nil }
     }
 
     /// Obtains what is not already held. `obtained` counts slots fetched now or found held.
