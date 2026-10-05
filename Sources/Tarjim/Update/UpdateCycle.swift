@@ -12,9 +12,9 @@ struct CycleEnvironment: Sendable {
 }
 
 enum RejectionReason: Equatable, Sendable {
-    /// C21: a `schemaVersion` this SDK does not know.
+    /// A `schemaVersion` this SDK does not know.
     case unknownSchema(Int)
-    /// C22: no `strings` file anywhere in the manifest.
+    /// No `strings` file anywhere in the manifest.
     case noStrings
     /// The bytes match `meta.checksum` but do not decode.
     case unreadable
@@ -29,13 +29,13 @@ enum CycleOutcome: Equatable, Sendable {
     case installed(InstallRecord)
     /// `meta` names the active install again while a newer one was pending: the pending one was dropped (a rollback).
     case discardedPending
-    /// The manifest was kept out (C21, C22); its checksum is marked rejected.
+    /// The manifest was kept out; its checksum is marked rejected.
     case rejected(checksum: String, RejectionReason)
     /// `meta` names a checksum already rejected or marked bad; nothing was fetched.
     case skipped
     /// 404 with nothing released to this stage yet.
     case unreleased
-    /// The configuration class (§2): reported by chunk 5; polling continues.
+    /// A key or binding problem (400, 401, 403, a missing track or stage): reported by chunk 5; polling continues.
     case configurationError(code: String)
     /// A 5xx, a 429, a network failure, an unreadable `meta` or a manifest that failed its checksum: backing off.
     case failed
@@ -47,7 +47,7 @@ struct CycleReport: Equatable, Sendable {
     let nextCheckIn: TimeInterval
 }
 
-/// §6.2's update cycle. Records what it builds as pending; activation is not its job.
+/// The update cycle. Records what it builds as pending; activation is not its job.
 actor UpdateCycle {
     fileprivate enum Kind { case poll, change }
 
@@ -69,7 +69,7 @@ actor UpdateCycle {
         return await start(.poll) { await $0.execute() }
     }
 
-    /// §6.2 step A: the selected locales changed; fetch what the newest manifest held lists for them.
+    /// The selected locales changed; fetch what the newest manifest held lists for them.
     func languageChanged() async -> CycleReport {
         while let current = running { _ = await current.task.value }
         return await start(.change) { await $0.executeLanguageChange() }
@@ -98,7 +98,7 @@ private struct Signature {
     var meta: Meta
     var raw: Data
     var etag: String?
-    /// C14 allows one extra read of `meta` per cycle.
+    /// An expired signature allows one extra read of `meta` per cycle.
     var reread = false
 }
 
@@ -109,7 +109,7 @@ private struct Abort {
 private struct Fetched {
     var obtained = 0
     var abort: Abort?
-    /// The C14 re-read named another release: this cycle's work is moot.
+    /// The re-read named another release: this cycle's work is moot.
     var superseded = false
 }
 
@@ -263,7 +263,7 @@ extension UpdateCycle {
         [state.pending, state.active].compactMap { $0 }.first { !state.badChecksums.contains($0.checksum) }
     }
 
-    // MARK: Identity (D-19)
+    // MARK: Identity: `meta.checksum` against the newest install known
 
     private func decide(_ signature: Signature, state: StoreState, interval: Int) async -> Verdict {
         let meta = signature.meta
@@ -304,7 +304,7 @@ extension UpdateCycle {
         }
     }
 
-    /// The newest install's missing wanted slots (owed or newly selected), and no install unless one arrived (I38).
+    /// The newest install's missing wanted slots (owed or newly selected), and no install unless one arrived.
     private func retryMissing(_ newest: InstallRecord, _ signature: Signature, interval: Int) async -> Verdict {
         let unchanged = Verdict(finish: .settled(.unchanged, interval: interval), held: signature)
         guard let layout = installedLayout(newest) else { return unchanged }
@@ -318,13 +318,13 @@ extension UpdateCycle {
         return await build(layout, checksum: newest.checksum, releaseId: signature.meta.releaseId, signature: signature, interval: interval)
     }
 
-    /// C14: `meta` moved on while this cycle worked, so nothing is recorded. The floor, not zero, so that a `meta`
+    /// `meta` moved on while this cycle worked, so nothing is recorded. The floor, not zero, so that a `meta`
     /// flapping between releases cannot loop without delay.
     private func supersededVerdict() -> Verdict {
         Verdict(finish: .settled(.unchanged, interval: 60), keepsStep: true)
     }
 
-    // MARK: Step A (I30)
+    // MARK: Language change
 
     fileprivate func executeLanguageChange() async -> CycleReport {
         let now = environment.now()
@@ -421,7 +421,7 @@ extension UpdateCycle {
         result.abort = first.abort
         guard result.abort == nil, !first.unfetchable.isEmpty, !signature.reread else { return result }
         signature.reread = true
-        // The signature may have expired; one fresh read, ignoring any cached answer, is all C14 allows.
+        // The signature may have expired; one fresh read, ignoring any cached answer, is all the contract allows.
         guard case let .received(meta, etag, raw) = await environment.client.fetchMeta(ifNoneMatch: nil) else { return result }
         guard meta.checksum == signature.meta.checksum else {
             result.superseded = true

@@ -51,7 +51,7 @@ struct StoreState: Codable, Equatable, Sendable {
     var checkInterval: Int?
     /// The ETag of the last `meta` 200, sent back as `If-None-Match`.
     var metaETag: String?
-    /// The raw `meta` naming the newest install, kept for its signature (§6.2 step A, owed retries).
+    /// The raw `meta` naming the newest install, kept for its signature (language changes, owed retries).
     var heldMeta: Data?
 
     init(sdkVersion: String) {

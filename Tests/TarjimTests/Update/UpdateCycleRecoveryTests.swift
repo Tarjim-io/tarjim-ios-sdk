@@ -49,7 +49,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(result1.outcome, .unchanged)
     }
 
-    /// The C14 re-read can show the stage has moved on; the release it left is not recorded, and the next check is soon.
+    /// The re-read after an expired signature can show the stage has moved on; the release it left is not recorded, and the next check is soon.
     func testAReReadNamingAnotherReleaseRecordsNothing() async throws {
         let device = try Device(self)
         let one = try Release.one()
@@ -69,7 +69,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(install.checksum, two.checksum)
     }
 
-    /// C14: an unchanged signature means the object is gone, not expired — no second request for it this cycle.
+    /// An unchanged signature means the object is gone, not expired — no second request for it this cycle.
     func testAnUnchangedSignatureIsNotRetried() async throws {
         let device = try Device(self)
         let release = try Release.one()
@@ -116,7 +116,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(last, 300)
     }
 
-    /// A due `run()` arriving during a language change polls `meta` itself rather than taking step A's answer.
+    /// A due `run()` arriving during a language change polls `meta` itself rather than taking the language change's answer.
     func testARunDuringALanguageChangeStillPolls() async throws {
         let device = try Device(self, locales: ["en"])
         device.server.publish(try Release.one())
@@ -168,7 +168,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(result2.outcome, .skipped)
     }
 
-    /// Step A with no held signature reads `meta` once — not again when the fresh signature is refused too.
+    /// A language change with no held signature reads `meta` once — not again when the fresh signature is refused too.
     func testALanguageChangeReadsMetaAtMostOnce() async throws {
         let device = try Device(self, locales: ["en"])
         let release = try Release.one()
@@ -244,7 +244,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         }
     }
 
-    /// C4: a manifest or object that keeps failing backs off further each time, even though `meta` itself answers.
+    /// A manifest or object that keeps failing backs off further each time, even though `meta` itself answers.
     func testBackoffGrowsWhenTheManifestOrAnObjectKeepsFailing() async throws {
         let device = try Device(self)
         let one = try Release.one()
@@ -276,7 +276,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(report.nextCheckIn, 600)
     }
 
-    /// Step A writes back only what it changed: a bad mark or crash count written meanwhile survives.
+    /// A language change writes back only what it changed: a bad mark or crash count written meanwhile survives.
     func testALanguageChangeDoesNotOverwriteStateWrittenMeanwhile() async throws {
         let device = try Device(self, locales: ["en"])
         let release = try Release.one()
@@ -403,7 +403,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(try device.file(fixed, en), newer)
     }
 
-    /// Step A's own `meta` read failing is not a failed cycle: the cadence stays as it was.
+    /// A language change's own `meta` read failing is not a failed cycle: the cadence stays as it was.
     func testALanguageChangeWhoseMetaReadFailsLeavesTheCadence() async throws {
         let device = try Device(self, locales: ["en"])
         device.server.publish(try Release.one())
@@ -513,7 +513,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         XCTAssertEqual(device.server.metaRequests.count, 1)
     }
 
-    /// Step A learning the stage moved on builds nothing for the release it left.
+    /// A language change learning the stage moved on builds nothing for the release it left.
     func testALanguageChangeAfterTheStageMovedBuildsNothing() async throws {
         let device = try Device(self, locales: ["en"])
         let one = try Release.one()
