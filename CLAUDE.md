@@ -30,13 +30,13 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
   - `Lookup/` picks the locales to serve (Apple's matcher plus a same-language, same-script check) and answers
     lookups from one immutable snapshot: downloaded text, then the app's own text, then the key. Nothing in a lookup
     touches the file system; each string is formatted with the locale it was found in.
+  - `Runtime/` ties them together: the `Engine` decides what lookups read (activation at a cold start, on a return
+    after an hour away or at once when nothing is held; a 10 s foreground probation and a revert after two crashed
+    launches), the `Reporter` turns cycle signals into once-per-condition reports, `Log` is the one logging call site,
+    and `Runtime` wires these behind the public `Tarjim` API. Checks and timers run only while the app is active.
 - `Tests/TarjimTests`: tests; `Tests/TarjimTests/Fixtures` holds hand-built server answers and, under
   `recorded/<name>/`, recordings (see the README there).
 - `scripts`: capture and test-report tooling.
-
-Planned components (not built yet):
-
-- `Reporter`: local reports only; no network.
 
 ## Rules
 
