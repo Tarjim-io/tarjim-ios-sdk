@@ -22,6 +22,11 @@ public struct TarjimReport: Equatable, Sendable {
     public let kind: Kind
     /// Plain English, for a log line.
     public let message: String
+
+    public init(kind: Kind, message: String) {
+        self.kind = kind
+        self.message = message
+    }
 }
 
 /// Turns cycle results into reports, once per condition. Never touches the network.

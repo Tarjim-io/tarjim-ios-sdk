@@ -185,6 +185,12 @@ final class Runtime: Sendable {
     }
 
     /// The app's active localization; a storyboard-only app reports "Base", which is never a language.
+    /// The app became active: the probation timer and the update schedule run until `resignedActive()`.
+    func becameActive() async {}
+
+    /// The app is no longer active: nothing runs in the background.
+    func resignedActive() async {}
+
     static func appLanguage(of bundle: Bundle) -> String {
         if let first = bundle.preferredLocalizations.first, first != "Base" { return first }
         return bundle.infoDictionary?["CFBundleDevelopmentRegion"] as? String ?? "en"
