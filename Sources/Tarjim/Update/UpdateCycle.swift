@@ -70,6 +70,8 @@ actor UpdateCycle {
     private var running: (kind: Kind, task: Task<CycleReport, Never>)?
     /// The cadence of this process. A save that fails must not turn every call into a `meta` read.
     fileprivate var remembered: (lastCheck: Date, interval: Int)?
+    /// What the running cycle has seen; cycles never overlap, so one buffer serves them all.
+    fileprivate var seen: [CycleSignal] = []
 
     init(_ environment: CycleEnvironment) {
         self.environment = environment
@@ -92,7 +94,9 @@ actor UpdateCycle {
 
     private func start(_ kind: Kind, _ work: @escaping @Sendable (UpdateCycle) async -> CycleReport) async -> CycleReport {
         let task = Task { [self] in
-            let report = await work(self)
+            clearSignals()
+            var report = await work(self)
+            report.signals = await finalSignals()
             finished()
             return report
         }
@@ -178,11 +182,13 @@ extension UpdateCycle {
         let newest = newestInstall(start)
         switch await environment.client.fetchMeta(ifNoneMatch: conditional(start, newest: newest)) {
         case let .received(meta, etag, raw):
+            seen.append(.metaAnswered)
             let pollAfter = Bounds.poll(meta.pollAfter)
             var verdict = await decide(Signature(meta: meta, raw: raw, etag: etag), state: start, interval: pollAfter)
             verdict.pollAfter = pollAfter
             return await conclude(verdict, now: now, start: start)
         case .notModified:
+            seen.append(.metaAnswered)
             let interval = Bounds.poll(start.lastPollAfter ?? 1800)
             guard let held = heldSignature(start) else {
                 return await conclude(Verdict(finish: .settled(.unchanged, interval: interval)), now: now, start: start)
@@ -200,6 +206,23 @@ extension UpdateCycle {
             return await conclude(Verdict(finish: .settled(.unreleased, interval: interval), pollAfter: pollAfter.map(Bounds.poll)),
                                   now: now, start: start)
         }
+    }
+
+    // MARK: Signals
+
+    fileprivate func clearSignals() { seen = [] }
+
+    /// `owed` is read after the cycle's own writes, so it describes the install the cycle ended with.
+    fileprivate func finalSignals() async -> [CycleSignal] {
+        var signals = seen
+        guard signals.contains(.metaAnswered) else { return signals }
+        let state = await environment.store.state
+        var hashes: Set<String> = []
+        if let newest = state.pending ?? state.active, !newest.owedSlots.isEmpty, let layout = installedLayout(newest) {
+            hashes = Set(newest.owedSlots.compactMap { layout.entries[$0]?.hash })
+        }
+        signals.append(.owed(hashes: hashes))
+        return signals
     }
 
     // MARK: Cadence
@@ -319,7 +342,10 @@ extension UpdateCycle {
             return await build(layout, checksum: meta.checksum, releaseId: meta.releaseId, signature: signature, interval: interval)
         case .unreadable:
             return reject(.unreadable)
-        case .checksumMismatch, .refused, .networkFailure:
+        case .checksumMismatch:
+            seen.append(.manifestChecksumMismatch(metaChecksum: meta.checksum))
+            return Verdict(finish: .backoff(retryAfter: nil))
+        case .refused, .networkFailure:
             return Verdict(finish: .backoff(retryAfter: nil))
         case let .throttled(retryAfter), let .serverError(retryAfter), let .unfetchable(_, retryAfter):
             return Verdict(finish: .backoff(retryAfter: retryAfter))
@@ -361,6 +387,7 @@ extension UpdateCycle {
         } else {
             switch await environment.client.fetchMeta(ifNoneMatch: nil) {
             case let .received(meta, etag, raw) where meta.checksum == newest.checksum:
+                seen.append(.metaAnswered)
                 signature = Signature(meta: meta, raw: raw, etag: etag, reread: true)
             case .throttled, .serverError, .networkFailure:
                 return CycleReport(outcome: .failed, nextCheckIn: wait)
@@ -446,6 +473,7 @@ extension UpdateCycle {
         signature.reread = true
         // The signature may have expired; one fresh read, ignoring any cached answer, is all the contract allows.
         guard case let .received(meta, etag, raw) = await environment.client.fetchMeta(ifNoneMatch: nil) else { return result }
+        seen.append(.metaAnswered)
         guard meta.checksum == signature.meta.checksum else {
             result.superseded = true
             return result
@@ -483,7 +511,9 @@ extension UpdateCycle {
                 }
             case .unfetchable:
                 unfetchable.append(slot)
-            case .refused, .hashMismatch, .tooLarge:
+            case .hashMismatch:
+                seen.append(.fileHashMismatch(hash: entry.hash))
+            case .refused, .tooLarge:
                 break
             case let .throttled(retryAfter), let .serverError(retryAfter):
                 return (obtained, unfetchable, Abort(retryAfter: retryAfter))
@@ -500,6 +530,8 @@ extension UpdateCycle {
         do {
             let install = try await environment.store.makeInstall(plan)
             try await environment.store.setPending(install)
+            seen.append(.installed(schemaVersion: layout.manifest.schemaVersion,
+                                   hasStrings: Manifests.hasStrings(layout.manifest), checksum: checksum))
             return Verdict(finish: .settled(.installed(install), interval: interval), held: signature)
         } catch {
             return Verdict(finish: .backoff(retryAfter: nil))
