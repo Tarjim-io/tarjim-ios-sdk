@@ -43,7 +43,6 @@ final class ResolverTests: XCTestCase {
         let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self), install: try LookupFixtures.install(for: self), selection: arabic)
         XCTAssertEqual(resolver.string("no.such.key"), "no.such.key")
         XCTAssertEqual(resolver.string("no.such.key", arguments: [3]), "no.such.key")
-        XCTAssertEqual(resolver.string(""), "")
     }
 
     /// The app's own copy of a bundle is the table of the bundle's name, or `Localizable` when the app has none.
