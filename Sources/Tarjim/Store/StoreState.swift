@@ -55,6 +55,8 @@ struct StoreState: Codable, Equatable, Sendable {
     var heldMeta: Data?
     /// The directory of an install activated but not yet proven: the app has not yet stayed in the foreground long enough.
     var probation: String?
+    /// A random identifier for this install, created on first start when the app allows sending it.
+    var installIdentifier: String?
 
     init(sdkVersion: String) {
         self.sdkVersion = sdkVersion
@@ -82,6 +84,7 @@ struct StoreState: Codable, Equatable, Sendable {
         metaETag = try c.decodeIfPresent(String.self, forKey: .metaETag)
         heldMeta = try c.decodeIfPresent(Data.self, forKey: .heldMeta)
         probation = try c.decodeIfPresent(String.self, forKey: .probation)
+        installIdentifier = try c.decodeIfPresent(String.self, forKey: .installIdentifier)
     }
 
     func isCheckDue(now: Date, pollAfter: Int) -> Bool {
