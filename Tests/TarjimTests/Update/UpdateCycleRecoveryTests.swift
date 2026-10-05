@@ -60,7 +60,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         device.server.answerObject(hash: try one.hash(of: en), fileType: "strings", try DeliveryFixtures.error("object-403-cdn-edge"))
         let report = try await device.cycle().run()
         XCTAssertEqual(report.nextCheckIn, 60, "soon, but never a loop with no delay")
-        if case .installed = report.outcome { XCTFail("recorded the release the stage left") }
+        XCTAssertEqual(report.outcome, .unchanged, "not a failure the app hears about")
         let state = await device.state
         XCTAssertNil(state.pending)
         device.clock.advance(60)
