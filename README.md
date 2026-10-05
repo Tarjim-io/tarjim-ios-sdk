@@ -10,7 +10,7 @@ Pre-release. The public API is not usable yet.
 ## Requirements
 
 - iOS 15 or later
-- Swift 5.9 or later (also builds cleanly in Swift 6 mode)
+- Swift 6.0 or later toolchain (Xcode 16+), Swift 6 language mode
 
 ## Installation
 
