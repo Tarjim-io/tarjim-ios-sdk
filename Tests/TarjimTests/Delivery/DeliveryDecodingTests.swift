@@ -79,17 +79,17 @@ final class DeliveryDecodingTests: XCTestCase {
         XCTAssertEqual(manifest.slices["ns7"]?["en"]?["strings"]?.hash.count, 64)
     }
 
-    func testABundleEntryWithoutATypeOrNameIsFatalBecauseItCannotBeAddressed() async throws {
+    /// A bundle entry without `type` and `name` cannot be addressed, so that bundle and its slices are
+    /// dropped; the other bundles keep working rather than freezing every bundle until the next release.
+    func testABundleEntryWithoutATypeOrNameIsDroppedWithItsSlices() async throws {
         var object = try baseline()
         var bundles = object["bundles"] as! [String: Any]
         bundles["ns7"] = ["colour": "blue"]
         object["bundles"] = bundles
-        let bytes = try JSONSerialization.data(withJSONObject: object)
-        var meta = try DeliveryFixtures.meta("cdn")
-        meta.checksum = Fixtures.sha256Hex(bytes)
-        let transport = FakeTransport()
-        transport.enqueue(FakeTransport.Answer(status: 200, body: bytes))
-        let outcome = try await DeliveryFixtures.client(transport).fetchManifest(meta)
-        XCTAssertEqual(outcome, .unreadable)
+        let manifest = try await verified(object)
+        XCTAssertNil(manifest.bundles["ns7"])
+        XCTAssertNil(manifest.slices["ns7"], "slices of an unaddressable bundle are dropped with it")
+        XCTAssertEqual(Set(manifest.bundles.keys), ["ns12", "ns15", "b3"])
+        XCTAssertEqual(Set(manifest.slices.keys), ["ns12", "ns15", "b3"])
     }
 }
