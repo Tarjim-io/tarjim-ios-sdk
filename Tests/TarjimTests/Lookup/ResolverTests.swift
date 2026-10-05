@@ -72,17 +72,17 @@ final class ResolverTests: XCTestCase {
                                                selection: arabic)
         XCTAssertEqual(resolver.string("items", arguments: [0]), "لا عناصر")
         XCTAssertEqual(resolver.string("items", arguments: [2]), "عنصران")
-        XCTAssertEqual(resolver.string("items", arguments: [3]), "3 عناصر")
-        XCTAssertEqual(resolver.string("items", arguments: [11]), "11 عنصرًا")
-        XCTAssertEqual(resolver.string("items", arguments: [100]), "100 عنصر")
+        XCTAssertEqual(resolver.string("items", arguments: [3]), "\(LookupFixtures.digits(3, "ar")) عناصر")
+        XCTAssertEqual(resolver.string("items", arguments: [11]), "\(LookupFixtures.digits(11, "ar")) عنصرًا")
+        XCTAssertEqual(resolver.string("items", arguments: [100]), "\(LookupFixtures.digits(100, "ar")) عنصر")
     }
 
     func testTheAppsOwnArabicPluralUsesArabicRules() throws {
         let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self, language: "en"), install: try LookupFixtures.install(for: self),
                                                selection: arabic)
         XCTAssertEqual(resolver.string("app.items", arguments: [2]), "اثنان")
-        XCTAssertEqual(resolver.string("app.items", arguments: [3]), "3 قليلة")
-        XCTAssertEqual(resolver.string("app.items", arguments: [11]), "11 كثيرة")
+        XCTAssertEqual(resolver.string("app.items", arguments: [3]), "\(LookupFixtures.digits(3, "ar")) قليلة")
+        XCTAssertEqual(resolver.string("app.items", arguments: [11]), "\(LookupFixtures.digits(11, "ar")) كثيرة")
     }
 
     /// Each string is formatted with the locale it was read in: Egyptian Arabic text gets Arabic-Indic digits,
@@ -91,8 +91,8 @@ final class ResolverTests: XCTestCase {
         let install = try LookupFixtures.install(for: self, extra: ["ns7.bundle/ar-EG.lproj/Localizable.strings": "\"eg.count\" = \"%d متبقية\";"])
         let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self, language: "en"), install: install,
                                                selection: LocaleSelection(kind: .user, locales: ["ar-EG", "ar"]))
-        XCTAssertEqual(resolver.string("eg.count", arguments: [3]), "٣ متبقية")
-        XCTAssertEqual(resolver.string("count.only", arguments: [3]), "3 left")
+        XCTAssertEqual(resolver.string("eg.count", arguments: [3]), "\(LookupFixtures.digits(3, "ar-EG")) متبقية")
+        XCTAssertEqual(resolver.string("count.only", arguments: [3]), "\(LookupFixtures.digits(3, "en")) left")
     }
 
     /// Apple's unformatted plural, as documented.

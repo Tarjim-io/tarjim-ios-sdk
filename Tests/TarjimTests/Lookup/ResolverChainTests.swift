@@ -32,8 +32,8 @@ final class ResolverChainTests: XCTestCase {
     func testTextFoundInTheParentLocaleUsesTheParentsFormatting() throws {
         let install = try LookupFixtures.install(for: self, extra: ["ns7.bundle/ar-EG.lproj/Localizable.strings": "\"eg.count\" = \"%d متبقية\";"])
         let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self), install: install, selection: egyptian)
-        XCTAssertEqual(resolver.string("items", arguments: [3]), "3 عناصر", "found in ar: Western digits")
-        XCTAssertEqual(resolver.string("eg.count", arguments: [3]), "٣ متبقية", "found in ar-EG: Arabic-Indic digits")
+        XCTAssertEqual(resolver.string("items", arguments: [3]), "\(LookupFixtures.digits(3, "ar")) عناصر", "found in ar: ar's digits")
+        XCTAssertEqual(resolver.string("eg.count", arguments: [3]), "\(LookupFixtures.digits(3, "ar-EG")) متبقية", "found in ar-EG: ar-EG's digits")
     }
 
     /// D-27: for a user the release has no language for, the app's own text (as Apple resolves it) comes before the
@@ -74,6 +74,13 @@ final class LocaleRulesTests: XCTestCase {
         XCTAssertEqual(LocaleSelector.match(preference: "mo", available: ["ro", "en"]), ["ro"])
     }
 
+    /// Apple can list candidates in another script after an accepted first answer (`sr-ME`, then Cyrillic `sr`); a
+    /// screen must never mix scripts, so only answers in the first one's language and script are kept.
+    func testOnlyAnswersInTheAcceptedScriptAreKept() {
+        XCTAssertEqual(LocaleSelector.match(preference: "sr-ME", available: ["sr-ME", "sr", "sr-Latn"]), ["sr-ME"])
+        XCTAssertEqual(LocaleSelector.match(preference: "zh-HK", available: ["zh-Hant-HK", "zh-Hant", "zh"]), ["zh-Hant-HK", "zh-Hant"])
+    }
+
     /// Manifest keys become folder names; one that is not a plain locale tag is never selected.
     func testAKeyThatIsNotALocaleTagIsNeverSelected() {
         XCTAssertEqual(LocaleSelector.match(preference: "en", available: ["../en", "en/x"]), [])
@@ -84,11 +91,14 @@ final class LocaleRulesTests: XCTestCase {
     /// iOS 15 has no likely-subtags lookup; the table that stands in for it must agree with Apple's on every language
     /// written in more than one script, and on the plain ones it is asked about.
     func testTheScriptTableAgreesWithApple() {
+        // Apple's answer exists only from iOS 16; on iOS 15 there is nothing to compare the table with. Cases whose
+        // likely script changed between Apple's data versions (ku-IQ, sd-IN) are left out: no single answer is right.
+        guard #available(iOS 16, macOS 13, *) else { return }
         let corpus = ["zh", "zh-CN", "zh-TW", "zh-HK", "zh-MO", "zh-SG", "zh-Hant", "zh-Hans-HK", "yue", "yue-CN", "sr", "sr-RS", "sr-ME",
                       "sr-Latn", "sr-Cyrl-ME", "uz", "uz-AF", "pa", "pa-PK", "az", "az-IR", "mn", "bs", "ms", "ha", "ks", "sd", "ug",
                       "kk", "ky", "tg", "ar", "en", "en-GB", "ru", "he", "iw", "ja", "ko", "el", "hi", "th", "fil", "tl", "no", "nb", "mo",
-                      "ku", "ku-IQ", "ff", "lb", "rm", "fo", "vai", "shi", "ha-SD", "ms-CC", "kk-CN", "ky-CN", "tg-PK", "mn-CN",
-                      "uz-CN", "sd-IN", "pa-IN", "az-AZ", "zh-Hant-CN", "sr-Latn-RS", "bs-Cyrl"]
+                      "ku", "ff", "lb", "rm", "fo", "vai", "shi", "ha-SD", "ms-CC", "kk-CN", "ky-CN", "tg-PK", "mn-CN",
+                      "uz-CN", "pa-IN", "az-AZ", "zh-Hant-CN", "sr-Latn-RS", "bs-Cyrl"]
         for identifier in corpus {
             let canonical = Locale.canonicalLanguageIdentifier(from: identifier)
             let apple = Locale.Language(identifier: Locale.Language(identifier: canonical).maximalIdentifier).script?.identifier
@@ -117,5 +127,19 @@ final class LocaleRulesTests: XCTestCase {
             answers.insert(BundleDirectory.id(for: .namespace("x"), in: entries) ?? "nil")
         }
         XCTAssertEqual(answers, ["z1"])
+    }
+}
+
+final class ResolverConcurrencyTests: XCTestCase {
+    /// First lookups fill the app-folder cache from many threads at once (run under the thread sanitizer in CI).
+    func testConcurrentFirstLookupsAgree() throws {
+        let resolver = LookupFixtures.resolver(app: try LookupFixtures.app(for: self), install: try LookupFixtures.install(for: self),
+                                               selection: LocaleSelection(kind: .user, locales: ["ar-EG", "ar"]))
+        let answers = Counter()
+        DispatchQueue.concurrentPerform(iterations: 400) { index in
+            let value = resolver.string(index % 2 == 0 ? "app.only" : "app.title")
+            if value == "من التطبيق" || value == "ترجم" { answers.increment() }
+        }
+        XCTAssertEqual(answers.value, 400)
     }
 }
