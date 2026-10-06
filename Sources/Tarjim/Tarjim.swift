@@ -182,6 +182,14 @@ public enum Tarjim {
     }
 }
 
+/// What `Tarjim.checkNow()` found.
+public enum TarjimCheckResult: Equatable, Sendable {
+    case noChange
+    case downloaded
+    case notDue
+    case failed
+}
+
 public struct TarjimConfiguration: Sendable {
     /// The Tarjim project whose released translations are downloaded.
     public var projectId: Int
