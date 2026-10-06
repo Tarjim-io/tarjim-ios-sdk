@@ -7,10 +7,14 @@ struct DeliveryClient: Sendable {
     let identity: ClientIdentity
     let transport: any Transport
     let apiVersion: String
+    /// Asked for at each request; `identity.language` is only the answer when nothing is supplied.
+    let language: @Sendable () -> String
 
-    init(endpoint: DeliveryEndpoint, identity: ClientIdentity, transport: any Transport, apiVersion: String = "2026-07-29") {
+    init(endpoint: DeliveryEndpoint, identity: ClientIdentity, transport: any Transport, apiVersion: String = "2026-07-29",
+         language: (@Sendable () -> String)? = nil) {
         self.endpoint = endpoint
         self.identity = identity
+        self.language = language ?? { identity.language }
         self.transport = transport
         self.apiVersion = apiVersion
     }
@@ -116,7 +120,9 @@ struct DeliveryClient: Sendable {
         guard withKey else { return }
         request.setValue(endpoint.apiKey, forHTTPHeaderField: "X-Tarjim-Apikey")
         request.setValue(apiVersion, forHTTPHeaderField: "X-Tarjim-Api-Version")
-        request.setValue(identity.userAgent, forHTTPHeaderField: "User-Agent")
+        var current = identity
+        current.language = language()
+        request.setValue(current.userAgent, forHTTPHeaderField: "User-Agent")
     }
 
     /// `nil` when the reference must not be requested.
