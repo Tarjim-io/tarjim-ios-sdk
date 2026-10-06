@@ -240,7 +240,8 @@ final class Runtime: Sendable {
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: environment.appVersion,
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
                                       installIdentifier: identifier)
-        let client = DeliveryClient(endpoint: endpoint, identity: identity, transport: environment.transport)
+        let client = DeliveryClient(endpoint: endpoint, identity: identity, transport: environment.transport,
+                                    language: { [self] in locale.identifier })
         let parts = self.parts
         let engine = Engine(EngineEnvironment(
             store: store, client: client, snapshots: snapshots, preferences: environment.preferences,
