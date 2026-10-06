@@ -59,8 +59,18 @@ jobs:
           set -euo pipefail
           # The iOS 16.4 runtime runs as x86_64 under Xcode 26.5.
           sudo softwareupdate --install-rosetta --agree-to-license
-          xcodebuild -downloadPlatform iOS -buildVersion "${{ matrix.ios }}"
+          # On a fresh runner the download can fail with "Unable to connect to simulator" until the service is up.
+          xcrun simctl list runtimes >/dev/null
+          for attempt in 1 2 3; do
+            xcodebuild -downloadPlatform iOS -buildVersion "${{ matrix.ios }}" && exit 0
+            echo "runtime download attempt $attempt failed" >&2
+            sleep 30
+          done
+          exit 1
       - name: Test
+        env:
+          # xcodebuild passes this to the tests as TARJIM_NO_TIMING: shared simulators are too uneven for time bounds.
+          TEST_RUNNER_TARJIM_NO_TIMING: "1"
         run: |
           set -euo pipefail
           runtime="com.apple.CoreSimulator.SimRuntime.iOS-$(echo "${{ matrix.ios }}" | tr . -)"
