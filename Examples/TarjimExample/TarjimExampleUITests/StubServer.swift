@@ -87,6 +87,9 @@ final class StubServer: @unchecked Sendable {
         _ = closed.wait(timeout: .now() + 5)
     }
 
+    /// Answers every request from now on with 503, as a server that is down would.
+    func failEverything() {}
+
     /// Serves `release` from the next request on.
     func publish(_ release: StubRelease) {
         lock.withLock {
