@@ -73,6 +73,34 @@ final class RuntimeLaunchTests: XCTestCase {
         XCTAssertGreaterThan(silent.requests.value, 0, "the launch went on to the network")
     }
 
+    /// A launch the system makes in the background (a push, a fetch) may look strings up too.
+    func testABackgroundLaunchServesTheActiveReleaseWhenItReturns() async throws {
+        let harness = try RuntimeHarness(self)
+        try await installOne(harness)
+        let runtime = try harness.make()
+        let (ready, title) = await onAThread {
+            (runtime.launch(foreground: false, waitingUpTo: 5), runtime.string("app.title", bundle: nil))
+        }
+        XCTAssertTrue(ready)
+        XCTAssertEqual(title, "Tarjim")
+    }
+
+    func testAnUnreadableStoreStillLetsLaunchReturnReady() async throws {
+        let harness = try RuntimeHarness(self)
+        try await installOne(harness)
+        let files = FileManager.default.enumerator(at: harness.root, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? []
+        for url in files where url.lastPathComponent == "state.json" {
+            try FileManager.default.removeItem(at: url)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        let runtime = try harness.make()
+        let (ready, title) = await onAThread {
+            (runtime.launch(foreground: true, waitingUpTo: 5), runtime.string("app.only", bundle: nil))
+        }
+        XCTAssertTrue(ready)
+        XCTAssertEqual(title, "From the app")
+    }
+
     func testPastTheBoundTheLaunchStillCompletes() async throws {
         let harness = try RuntimeHarness(self)
         try await installOne(harness)
@@ -112,9 +140,32 @@ private struct SilentTransport: Transport {
 }
 
 final class ReadyLatchTests: XCTestCase {
-    func testAClosedLatchWaitsOutItsBoundAndSaysSo() {
+    /// On a plain thread, as the latch requires; the expectation fails the test instead of letting a wait hang the run.
+    private func onAThread<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T? {
+        let result = TestValue<T?>(nil)
+        let done = expectation(description: "returned")
+        Thread {
+            result.value = body()
+            done.fulfill()
+        }.start()
+        await fulfillment(of: [done], timeout: 5)
+        return result.value
+    }
+
+    private static func seconds(since start: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+    }
+
+    func testAClosedLatchWaitsOutItsBoundAndSaysSo() async {
         let latch = ReadyLatch()
-        XCTAssertFalse(latch.wait(upTo: 0.2))
+        let outcome = await onAThread { () -> [Double] in
+            let start = DispatchTime.now().uptimeNanoseconds
+            let opened = latch.wait(upTo: 0.2)
+            return [opened ? 1 : 0, Self.seconds(since: start)]
+        }
+        XCTAssertEqual(outcome?[0], 0)
+        XCTAssertGreaterThanOrEqual(outcome?[1] ?? 0, 0.19)
+        XCTAssertLessThan(outcome?[1] ?? .infinity, 1.2)
         XCTAssertFalse(latch.isOpen)
     }
 
@@ -128,10 +179,15 @@ final class ReadyLatchTests: XCTestCase {
 
     func testOpeningReleasesAWaiter() async {
         let latch = ReadyLatch()
-        let waited = Task.detached { latch.wait(upTo: 10) }
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        latch.open()
-        let released = await waited.value
-        XCTAssertTrue(released)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { latch.open() }
+        let released = await onAThread { latch.wait(upTo: 10) }
+        XCTAssertEqual(released, true)
+    }
+
+    func testAnUnboundedWaitStillReturnsWhenOpened() async {
+        let latch = ReadyLatch()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { latch.open() }
+        let released = await onAThread { latch.wait(upTo: .infinity) }
+        XCTAssertEqual(released, true)
     }
 }
