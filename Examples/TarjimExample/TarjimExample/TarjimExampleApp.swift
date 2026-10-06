@@ -3,9 +3,13 @@ import Tarjim
 
 @main
 struct TarjimExampleApp: App {
+    @StateObject private var model: UpdateModel
+
     init() {
         // Before any view exists, so the first lookup already goes through Tarjim.
         Self.resetStoreIfAsked()
+        // Opened before `start`: a stream sees the events of the start that follows.
+        _model = StateObject(wrappedValue: UpdateModel())
         let environment = ProcessInfo.processInfo.environment
         Tarjim.start(TarjimConfiguration(
             projectId: Int(environment["TARJIM_EXAMPLE_PROJECT_ID"] ?? "") ?? 0,
@@ -17,7 +21,7 @@ struct TarjimExampleApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(model: model)
         }
     }
 

@@ -2,9 +2,7 @@ import SwiftUI
 import Tarjim
 
 struct ContentView: View {
-    @State private var status = "none"
-    /// Bumped to render again: text that is already on screen does not change by itself.
-    @State private var generation = 0
+    @ObservedObject var model: UpdateModel
 
     var body: some View {
         VStack(spacing: 16) {
@@ -13,7 +11,7 @@ struct ContentView: View {
             Text(Tarjim.string("greeting")).accessibilityIdentifier("explicit")
             StoryboardLabel().frame(height: 40)
             Text(Tarjim.string("items.count", 3)).accessibilityIdentifier("formatted")
-            Text(status).accessibilityIdentifier("status")
+            Text(model.status).accessibilityIdentifier("status")
             Button("Activate update") {
                 Task {
                     _ = await Tarjim.activatePendingUpdate()
@@ -23,30 +21,14 @@ struct ContentView: View {
             Button("Arabic") { choose("ar") }.accessibilityIdentifier("lang-ar")
             Button("System language") { choose(nil) }.accessibilityIdentifier("lang-system")
         }
-        .id(generation)
+        .id(model.generation)
         .padding()
-        .task {
-            // `Tarjim.start` works in the background and sends no event for the install that is already active, so
-            // the first frame can show the app's own text. One later render picks up what the launch installed.
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            generation += 1
-        }
-        .task {
-            for await update in Tarjim.updates() {
-                switch update {
-                case .downloaded: status = "downloaded"
-                case .activated:
-                    status = "activated"
-                    generation += 1
-                }
-            }
-        }
     }
 
     private func choose(_ language: String?) {
         Task {
             await Tarjim.setLanguage(language)
-            generation += 1
+            model.render()
         }
     }
 }
