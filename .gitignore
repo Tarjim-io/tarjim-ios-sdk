@@ -3,3 +3,7 @@
 *.xcresult
 .DS_Store
 __pycache__/
+
+# Xcode
+xcuserdata/
+Package.resolved
