@@ -1,0 +1,353 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		30AA4A21923C55B034ED5B6F /* Tarjim in Frameworks */ = {isa = PBXBuildFile; productRef = C8D3B0C1933644FEC6D8F269 /* Tarjim */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		45EB0B7D2A4E88CA82CFC843 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4C3D5919B6D96244BD04D9D1;
+			proxyType = 1;
+			remoteGlobalIDString = 7D335CFEA2C86AD77675BA28;
+			remoteInfo = TarjimExample;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		F6EB7B96C6ABF52A2EA9DC70 /* TarjimExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TarjimExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA94183E3A325AFA6AFB5431 /* TarjimExampleUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TarjimExampleUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		182FA91E4B20D9231BDB21A6 /* TarjimExample */ = {isa = PBXFileSystemSynchronizedRootGroup; path = TarjimExample; sourceTree = "<group>"; };
+		C0BA27586E7B2999F79467A7 /* TarjimExampleUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = TarjimExampleUITests; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5725D5DDCD7A0394B7989D26 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				30AA4A21923C55B034ED5B6F /* Tarjim in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0BB6CCA8C90B0EA83224F77 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B2B338921D30B9D3E5ECDEAB = {
+			isa = PBXGroup;
+			children = (
+				182FA91E4B20D9231BDB21A6 /* TarjimExample */,
+				C0BA27586E7B2999F79467A7 /* TarjimExampleUITests */,
+				EEC3206C4A9D2BB69EA879FD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EEC3206C4A9D2BB69EA879FD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F6EB7B96C6ABF52A2EA9DC70 /* TarjimExample.app */,
+				FA94183E3A325AFA6AFB5431 /* TarjimExampleUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7D335CFEA2C86AD77675BA28 /* TarjimExample */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 46229F1FC7182023563FE29E;
+			buildPhases = (
+				05757127A12D6F7F7BF48E1B,
+				5725D5DDCD7A0394B7989D26,
+				E59D2478A237E66F052A7806,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				182FA91E4B20D9231BDB21A6,
+			);
+			name = TarjimExample;
+			packageProductDependencies = (
+				C8D3B0C1933644FEC6D8F269 /* Tarjim */,
+			);
+			productName = TarjimExample;
+			productReference = F6EB7B96C6ABF52A2EA9DC70;
+			productType = "com.apple.product-type.application";
+		};
+		848121C43DC7DA02B4B6F95C /* TarjimExampleUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D262AEA7308739D7BC7C6D53;
+			buildPhases = (
+				01EF77A2E14C0CB070F28C5A,
+				D0BB6CCA8C90B0EA83224F77,
+				6FA75A6DF1A3B2B04AAEB581,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				120F23CC74BD0081E8C15456,
+			);
+			fileSystemSynchronizedGroups = (
+				C0BA27586E7B2999F79467A7,
+			);
+			name = TarjimExampleUITests;
+			packageProductDependencies = (
+			);
+			productName = TarjimExampleUITests;
+			productReference = FA94183E3A325AFA6AFB5431;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4C3D5919B6D96244BD04D9D1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					7D335CFEA2C86AD77675BA28 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					848121C43DC7DA02B4B6F95C = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 7D335CFEA2C86AD77675BA28;
+					};
+				};
+			};
+			buildConfigurationList = F53123C9F068EC55F62D37C0;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				ar,
+			);
+			mainGroup = B2B338921D30B9D3E5ECDEAB;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AB0B233A627339EBF5DC58D3 /* XCLocalSwiftPackageReference "../.." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EEC3206C4A9D2BB69EA879FD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7D335CFEA2C86AD77675BA28 /* TarjimExample */,
+				848121C43DC7DA02B4B6F95C /* TarjimExampleUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E59D2478A237E66F052A7806 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6FA75A6DF1A3B2B04AAEB581 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		05757127A12D6F7F7BF48E1B = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		01EF77A2E14C0CB070F28C5A = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		120F23CC74BD0081E8C15456 = {
+			isa = PBXTargetDependency;
+			target = 7D335CFEA2C86AD77675BA28 /* TarjimExample */;
+			targetProxy = 45EB0B7D2A4E88CA82CFC843;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		79C308B25433C0DB509D0C48 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		6A904B5154FDC23A0FB35E92 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C04A86CA277E1F334468FFF0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.TarjimExample;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		E13DDD817563D49F35D5B6AD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.TarjimExample;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		8BA43C89477473392BE4C9DE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.TarjimExampleUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_TARGET_NAME = TarjimExample;
+			};
+			name = Debug;
+		};
+		C5FF697B01B8D43536D25B8B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.TarjimExampleUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_TARGET_NAME = TarjimExample;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F53123C9F068EC55F62D37C0 /* Build configuration list for PBXProject "TarjimExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				79C308B25433C0DB509D0C48 /* Debug */,
+				6A904B5154FDC23A0FB35E92 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		46229F1FC7182023563FE29E /* Build configuration list for PBXNativeTarget "TarjimExample" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C04A86CA277E1F334468FFF0 /* Debug */,
+				E13DDD817563D49F35D5B6AD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D262AEA7308739D7BC7C6D53 /* Build configuration list for PBXNativeTarget "TarjimExampleUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8BA43C89477473392BE4C9DE /* Debug */,
+				C5FF697B01B8D43536D25B8B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AB0B233A627339EBF5DC58D3 /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C8D3B0C1933644FEC6D8F269 /* Tarjim */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Tarjim;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 4C3D5919B6D96244BD04D9D1 /* Project object */;
+}
