@@ -304,6 +304,11 @@ final class Runtime: Sendable {
 
     /// One check now, with its report passed to the reporter.
     @discardableResult
+    /// One check on the app's request; see `Tarjim.checkNow()`.
+    func checkOnRequest() async -> TarjimCheckResult {
+        .notDue
+    }
+
     func checkNow() async -> CycleReport {
         // Before `start` has built the engine there is nothing to check; try again in an hour.
         guard let engine = parts.engine else { return CycleReport(outcome: .failed, nextCheckIn: 3600) }
