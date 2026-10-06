@@ -74,6 +74,8 @@ final class ExampleAppTests: XCTestCase {
         wait(text(app, "storyboard"), toRead: "القصة من ترجم", timeout: 5)
         app.buttons["lang-system"].tap()
         wait(text(app, "proxied"), toRead: "Hello from Tarjim", timeout: 10)
+        wait(text(app, "explicit"), toRead: "Hello from Tarjim", timeout: 5)
+        wait(text(app, "storyboard"), toRead: "Storyboard from Tarjim", timeout: 5)
     }
 
     func testWhenTheServerFailsTheAppShowsItsOwnText() throws {
@@ -101,6 +103,19 @@ final class ExampleAppTests: XCTestCase {
         app.buttons["activate"].tap()
         wait(text(app, "proxied"), toRead: "Hello again from Tarjim", timeout: 10)
         wait(text(app, "status"), toRead: "activated", timeout: 5)
+    }
+
+    /// The next cold start shows a downloaded release, and says so: the app's listener exists before `start`.
+    func testTheNextColdStartShowsTheDownloadedReleaseAndSaysSo() throws {
+        let host = try server.start()
+        let first = launch(host: host, reset: true)
+        wait(text(first, "status"), toRead: "activated", timeout: firstCheck)
+        server.publish(.second)
+        wait(text(first, "status"), toRead: "downloaded", timeout: secondCheck)
+        first.terminate()
+        let second = launch(host: host, reset: false)
+        wait(text(second, "proxied"), toRead: "Hello again from Tarjim", timeout: 10)
+        wait(text(second, "status"), toRead: "activated", timeout: 5)
     }
 
     func testTheKeyTravelsOnlyInItsHeader() throws {
