@@ -24,7 +24,8 @@ No version is tagged yet, so this line will not resolve until the first release.
 
 ## Setup
 
-Call `start` once, early, on the main thread — in `application(_:didFinishLaunchingWithOptions:)` or your SwiftUI `App`'s initialiser:
+Call `start` once, early, on the main thread — in `application(_:didFinishLaunchingWithOptions:)` or your SwiftUI
+`App`'s initialiser:
 
 ```swift
 import Tarjim
