@@ -21,7 +21,7 @@ final class LanguageOverrideTests: XCTestCase {
         XCTAssertEqual(process.string("app.title"), "ترجم")
         let selection = await process.engine.selection
         XCTAssertEqual(selection, LocaleSelection(kind: .user, locales: ["ar"]))
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { updates.value.count >= 1 })
         XCTAssertEqual(updates.value, [.activated])
     }
 

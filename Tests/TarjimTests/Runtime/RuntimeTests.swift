@@ -67,7 +67,7 @@ final class RuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.string("app.title", bundle: nil), "Tarjim")
         XCTAssertEqual(runtime.string("greeting", arguments: ["Sam"], bundle: nil), "Hello, Sam!")
         XCTAssertEqual(runtime.locale.identifier, "en")
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { seen.value.count >= 2 })
         XCTAssertEqual(seen.value, [.downloaded, .activated])
     }
 

@@ -27,7 +27,7 @@ final class EngineEdgeTests: XCTestCase {
         let updates = process.recordUpdates()
         let report = await process.engine.check()
         guard case .installed = report.outcome else { return XCTFail("\(report)") }
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { updates.value.count >= 1 })
         XCTAssertEqual(updates.value, [.downloaded])
         XCTAssertEqual(process.string("app.title"), "ترجم")
     }
@@ -308,7 +308,7 @@ final class EngineEdgeTests: XCTestCase {
         process.appLanguage.value = "ar"
         process.preferences.value = ["ar-LB"]
         await process.engine.selectionChanged()
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { updates.value.count >= 1 })
         XCTAssertEqual(updates.value, [.activated])
     }
 

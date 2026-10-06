@@ -42,7 +42,7 @@ final class RuntimeLifecycleTests: XCTestCase {
         await EngineFixtures.settle()
         XCTAssertEqual(harness.server.metaRequests.count, 0)
         await runtime.becameActive()
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { harness.server.metaRequests.count >= 1 })
         XCTAssertEqual(harness.server.metaRequests.count, 1)
         await runtime.resignedActive()
         let after = harness.server.metaRequests.count

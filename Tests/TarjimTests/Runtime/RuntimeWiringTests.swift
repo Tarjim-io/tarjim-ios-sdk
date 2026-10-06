@@ -42,7 +42,7 @@ final class RuntimeWiringTests: XCTestCase {
         await runtime.resignedActive()
         harness.clock.advance(Engine.longBackgroundSeconds)
         await runtime.becameActive()
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { runtime.string("app.title", bundle: nil) == "Tarjim 2" })
         XCTAssertEqual(runtime.string("app.title", bundle: nil), "Tarjim 2")
         await runtime.resignedActive()
     }
@@ -113,13 +113,13 @@ final class RuntimeWiringTests: XCTestCase {
         runtime.noteBecameActive()
         runtime.noteResignedActive()
         runtime.noteBecameActive()
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { harness.server.metaRequests.count >= 1 })
         XCTAssertGreaterThanOrEqual(harness.server.metaRequests.count, 1)
         let before = harness.server.metaRequests.count
         harness.clock.advance(86_400)
         harness.releaseBlockedSleeps.value = true
         harness.instantSleeps.value = harness.sleeps.value.count + 2
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { harness.server.metaRequests.count > before })
         XCTAssertGreaterThan(harness.server.metaRequests.count, before, "the schedule is still running")
         await runtime.resignedActive()
     }
