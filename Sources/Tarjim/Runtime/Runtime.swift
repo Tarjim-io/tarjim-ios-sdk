@@ -27,9 +27,48 @@ final class Runtime: Sendable {
         private var resignedAt: Date?
         private var startFinished = false
         private var startWaiters: [CheckedContinuation<Void, Never>] = []
+        private var launchBegun = false
+        private var proxyInstalled = false
+        private var isReady = false
+        // A condition, not a semaphore: `launch` blocks a plain thread on it, never a task of the cooperative pool.
+        private let readiness = NSCondition()
 
         /// The timers run exactly while the app is active.
         var isActive: Bool { lock.withLock { probationTask != nil } }
+
+        /// True the first time only.
+        func markLaunchBegun() -> Bool {
+            lock.withLock {
+                defer { launchBegun = true }
+                return !launchBegun
+            }
+        }
+
+        /// True the first time only.
+        func markProxyInstalled() -> Bool {
+            lock.withLock {
+                defer { proxyInstalled = true }
+                return !proxyInstalled
+            }
+        }
+
+        func markReady() {
+            readiness.lock()
+            isReady = true
+            readiness.broadcast()
+            readiness.unlock()
+        }
+
+        /// Blocks the calling thread until ready or `bound` seconds pass; returns whether ready.
+        func waitUntilReady(upTo bound: TimeInterval) -> Bool {
+            readiness.lock()
+            defer { readiness.unlock() }
+            let deadline = Date(timeIntervalSinceNow: max(0, bound))
+            while !isReady {
+                guard readiness.wait(until: deadline) else { break }
+            }
+            return isReady
+        }
 
         func finishStart() {
             let waiters = lock.withLock {
@@ -159,17 +198,29 @@ final class Runtime: Sendable {
     /// to `bound` seconds until lookups serve what this launch shows. Returns whether they do; past the bound they
     /// catch up in the background. A second call starts nothing.
     func launch(foreground: Bool, waitingUpTo bound: TimeInterval) -> Bool {
-        false
+        installMainBundleProxy()
+        if parts.markLaunchBegun() {
+            Task.detached { [self] in await start(foreground: foreground) }
+        }
+        return parts.waitUntilReady(upTo: bound)
+    }
+
+    /// Returns once the launch has finished, so what follows it sees the engine.
+    func waitForLaunch() async { await parts.waitForStart() }
+
+    /// Whichever entry runs first installs it; the main bundle is patched once.
+    private func installMainBundleProxy() {
+        guard configuration.interceptsMainBundle, parts.markProxyInstalled() else { return }
+        let resolver = resolver
+        MainBundleProxy.install(on: environment.appBundle) { key, table in resolver.downloaded(key, table: table) }
     }
 
     /// Launches the engine, cleans up, and reports a revert. Once per instance.
     func start(foreground: Bool) async {
         guard parts.markStarted() else { return }
-        defer { parts.finishStart() }
-        if configuration.interceptsMainBundle {
-            let resolver = resolver
-            MainBundleProxy.install(on: environment.appBundle) { key, table in resolver.downloaded(key, table: table) }
-        }
+        // `ready` is idempotent; this covers a launch that ends without the engine reaching it.
+        defer { parts.finishStart(); parts.markReady() }
+        installMainBundleProxy()
         let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: environment.appVersion,
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
@@ -181,7 +232,8 @@ final class Runtime: Sendable {
             appLanguage: environment.appLanguage, fallbackLanguage: configuration.fallbackLanguage,
             now: environment.now, random: environment.random,
             // An install shown mid-session is proven by the foreground time after it, not before.
-            activated: { [self] in parts.restartProbation(makeProbationTask) }))
+            activated: { [self] in parts.restartProbation(makeProbationTask) },
+            ready: { parts.markReady() }))
         parts.engine = engine
         // The stream is opened before the launch so no event is missed.
         let events = engine.updates()

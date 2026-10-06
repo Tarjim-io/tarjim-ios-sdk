@@ -22,6 +22,8 @@ struct EngineEnvironment: Sendable {
     let random: @Sendable () -> Double
     /// Called synchronously, inside the activation lock, right after an install is activated.
     var activated: @Sendable () -> Void = {}
+    /// Called once the launch has built its snapshot, before anything that can touch the network.
+    var ready: @Sendable () -> Void = {}
 }
 
 /// Event streams and the language override, read from synchronous contexts.
@@ -227,6 +229,7 @@ actor Engine {
             }
             await rebuildSnapshot()
         }
+        environment.ready()
         // A choice stored before this launch may name a language the active install lacks.
         if foreground { await fetchSelectionIfNotHeld() }
     }

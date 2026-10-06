@@ -47,8 +47,11 @@ private final class RuntimeBox: @unchecked Sendable {
 public enum Tarjim {
     private static let box = RuntimeBox()
 
-    /// Starts the SDK: call it once, early, before the first lookup. It returns at once and does its work in the
-    /// background; a second call is ignored. An invalid `host` is a programmer error: it stops a debug build with an
+    /// Starts the SDK: call it once, early, before the first lookup, on the main thread. There it waits up to
+    /// `Runtime.launchBound` (one second) while the stored release is loaded, so the first lookup already serves it, and
+    /// a release downloaded earlier is shown from the first screen; past the bound, lookups catch up in the background.
+    /// Nothing waits for the network. Called off the main thread it returns at once and does its work in the
+    /// background. The main bundle is routed through Tarjim before it returns. A second call is ignored. An invalid `host` is a programmer error: it stops a debug build with an
     /// assertion and is ignored in a release build.
     public static func start(_ configuration: TarjimConfiguration) {
         guard box.current == nil else { return }
@@ -72,10 +75,21 @@ public enum Tarjim {
         }
         guard box.install(runtime) else { return }
         observeLifecycle(of: runtime)
-        Task.detached {
-            let active = await isActive()
-            await runtime.start(foreground: active)
-            if active { await runtime.becameActive() }
+        if Thread.isMainThread {
+            let active = isActiveOnMainThread()
+            _ = runtime.launch(foreground: active, waitingUpTo: Runtime.launchBound)
+            if active {
+                Task.detached {
+                    await runtime.waitForLaunch()
+                    await runtime.becameActive()
+                }
+            }
+        } else {
+            Task.detached {
+                let active = await isActive()
+                await runtime.start(foreground: active)
+                if active { await runtime.becameActive() }
+            }
         }
     }
 
@@ -140,6 +154,14 @@ public enum Tarjim {
     private static func isActive() async -> Bool {
         #if canImport(UIKit)
         await MainActor.run { UIApplication.shared.applicationState != .background }
+        #else
+        true
+        #endif
+    }
+
+    private static func isActiveOnMainThread() -> Bool {
+        #if canImport(UIKit)
+        MainActor.assumeIsolated { UIApplication.shared.applicationState != .background }
         #else
         true
         #endif
