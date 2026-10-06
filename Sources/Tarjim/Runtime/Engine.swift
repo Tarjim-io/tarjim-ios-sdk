@@ -185,7 +185,7 @@ actor Engine {
     // MARK: Activation
 
     /// Activation, revert and the snapshot swap that follows them run one at a time, so none interleaves with another.
-    private func exclusive<T>(_ body: () async -> T) async -> T {
+    private func exclusive<T: Sendable>(_ body: () async -> T) async -> T {
         if exclusiveBusy {
             await withCheckedContinuation { exclusiveWaiters.append($0) }
         } else {
