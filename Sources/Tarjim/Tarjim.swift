@@ -47,12 +47,12 @@ private final class RuntimeBox: @unchecked Sendable {
 public enum Tarjim {
     private static let box = RuntimeBox()
 
-    /// Starts the SDK: call it once, early, before the first lookup, on the main thread. There it waits up to
-    /// `Runtime.launchBound` (one second) while the stored release is loaded, so the first lookup already serves it, and
-    /// a release downloaded earlier is shown from the first screen; past the bound, lookups catch up in the background.
-    /// Nothing waits for the network. Called off the main thread it returns at once and does its work in the
-    /// background. The main bundle is routed through Tarjim before it returns. A second call is ignored. An invalid `host` is a programmer error: it stops a debug build with an
-    /// assertion and is ignored in a release build.
+    /// Starts the SDK: call it once, early, before the first lookup, on the main thread. There it routes the main bundle
+    /// through Tarjim, then waits up to about a second while the stored release is loaded, so the first lookup already
+    /// serves it and a release downloaded earlier is shown from the first screen; past that, lookups catch up in the
+    /// background. Nothing waits for the network. Called off the main thread it returns at once, and the main bundle
+    /// is routed through Tarjim in the background. A second call is ignored. An invalid `host` is a programmer error:
+    /// it stops a debug build with an assertion and is ignored in a release build.
     public static func start(_ configuration: TarjimConfiguration) {
         guard box.current == nil else { return }
         let environment: Runtime.Environment
@@ -77,6 +77,7 @@ public enum Tarjim {
         observeLifecycle(of: runtime)
         if Thread.isMainThread {
             let active = isActiveOnMainThread()
+            // The wait applies to a background launch too: lookups there (notification text, for one) need the stored release.
             _ = runtime.launch(foreground: active, waitingUpTo: Runtime.launchBound)
             if active {
                 Task.detached {
