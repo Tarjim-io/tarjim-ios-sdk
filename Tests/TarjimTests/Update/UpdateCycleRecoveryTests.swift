@@ -384,7 +384,7 @@ final class UpdateCycleRecoveryTests: XCTestCase {
         let report = try await device.cycle().run()
         guard case .installed(let install) = report.outcome else { return XCTFail("\(report)") }
         XCTAssertEqual(install.owedSlots, [])
-        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+        Timing.assertElapsed(since: started, under: 10)
     }
 
     /// An owed slot holds the active install's older file; it is still owed, and retried in the next due cycle.
