@@ -63,7 +63,7 @@ final class ResolverChainTests: XCTestCase {
             _ = resolver.string("app.title")
             _ = resolver.string(index % 2 == 0 ? "app.only" : "no.such.key")
         }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1.0)
+        Timing.assertElapsed(since: started, under: 1.0)
     }
 }
 

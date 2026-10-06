@@ -318,7 +318,7 @@ final class StoreRecoveryTests: XCTestCase {
         try await StoreFixtures.stage(store, plan, files)
         let started = Date()
         let install = try await store.makeInstall(plan)
-        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+        Timing.assertElapsed(since: started, under: 3)
         XCTAssertEqual(install.owedSlots, [])
     }
 
@@ -369,8 +369,8 @@ final class StoreRecoveryTests: XCTestCase {
                 XCTAssertNotNil(held, "\(round)")
             }
         }
-        // Loose enough for a shared CI simulator; the uncached scan took several seconds per few hundred calls.
-        XCTAssertLessThan(Date().timeIntervalSince(started), 5.0)
+        // The uncached scan took several seconds for these calls.
+        Timing.assertElapsed(since: started, under: 1.0)
     }
 
     /// `save` applies the same checks as loading: an unsafe name never reaches cleanup or a copy.
