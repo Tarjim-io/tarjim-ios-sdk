@@ -88,6 +88,16 @@ actor UpdateCycle {
         return await start(.poll) { await $0.execute() }
     }
 
+    /// Like `run()`, but reads `meta` even when the cadence says it is not due. A failure backoff still holds: while it
+    /// runs, this returns `.notDue` without a request.
+    func runNow() async -> CycleReport {
+        while let current = running {
+            if current.kind == .poll { return await current.task.value }
+            _ = await current.task.value
+        }
+        return await start(.poll) { await $0.execute(ignoringCadence: true) }
+    }
+
     /// The selected locales changed; fetch what the newest manifest held lists for them.
     func languageChanged() async -> CycleReport {
         while let current = running { _ = await current.task.value }
@@ -175,10 +185,12 @@ private enum Manifests {
 // MARK: - The cycle
 
 extension UpdateCycle {
-    fileprivate func execute() async -> CycleReport {
+    fileprivate func execute(ignoringCadence: Bool = false) async -> CycleReport {
         let now = environment.now()
         let start = await environment.store.state
-        guard isDue(start, now: now) else {
+        // `backoffStep` stays above 0 until a cycle settles, so it marks a wait that a request must not cut short.
+        let mayRead = isDue(start, now: now) || (ignoringCadence && start.backoffStep <= 0)
+        guard mayRead else {
             return CycleReport(outcome: .notDue, nextCheckIn: remaining(start, now: now))
         }
         let newest = newestInstall(start)
