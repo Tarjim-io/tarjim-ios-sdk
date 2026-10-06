@@ -8,8 +8,10 @@ struct TarjimExampleApp: App {
     init() {
         // Before any view exists, so the first lookup already goes through Tarjim.
         Self.resetStoreIfAsked()
-        // Opened before `start`: a stream sees the events of the start that follows.
-        _model = StateObject(wrappedValue: UpdateModel())
+        // Built here, not in the autoclosure `StateObject` runs later, so its stream is open before `start` activates
+        // anything.
+        let model = UpdateModel()
+        _model = StateObject(wrappedValue: model)
         let environment = ProcessInfo.processInfo.environment
         Tarjim.start(TarjimConfiguration(
             projectId: Int(environment["TARJIM_EXAMPLE_PROJECT_ID"] ?? "") ?? 0,
