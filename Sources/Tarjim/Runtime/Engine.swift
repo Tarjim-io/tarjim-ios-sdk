@@ -109,6 +109,18 @@ actor Engine {
         return report
     }
 
+    /// One cycle on the app's request: reads `meta` outside the cadence, and acts on the result as `check()` does.
+    func checkOnRequest() async -> CycleReport {
+        guard let launchTask else { return CycleReport(outcome: .notDue, nextCheckIn: 0) }
+        await launchTask.value
+        await refreshOverride()
+        let state = await environment.store.state
+        let known = (state.pending ?? state.active)?.checksum
+        let report = await cycle.runNow()
+        await handle(report, knownChecksum: known)
+        return report
+    }
+
     /// Stores the language the app asked for (nil: follow the app's language again) and serves it if the release has it.
     func setLanguageOverride(_ identifier: String?) async {
         do {

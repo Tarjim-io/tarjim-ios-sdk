@@ -129,6 +129,23 @@ public enum Tarjim {
         return await runtime.activatePendingUpdate()
     }
 
+    /// Checks for an update now, outside the server's schedule, and returns what it found.
+    ///
+    /// - At most one extra check a minute: a call within a minute of the previous one returns that answer without a
+    ///   request, and calls made together share one check.
+    /// - Never sooner than the server allows after an error: while a wait it asked for (`Retry-After` included) has
+    ///   not passed, the result is `.notDue` and nothing is requested. The same applies before `start`.
+    /// - It counts as the latest scheduled check, so the next one moves out by the server's interval.
+    /// - It downloads but does not show: use `activatePendingUpdate()` to show the update now. The one exception is
+    ///   the first download, shown as soon as it is complete when nothing is held yet.
+    ///
+    /// Results: `.downloaded` a newer release arrived; `.noChange` nothing newer; `.notDue` no request was made;
+    /// `.failed` the check could not complete.
+    public static func checkNow() async -> TarjimCheckResult {
+        guard let runtime = box.current else { return .notDue }
+        return await runtime.checkOnRequest()
+    }
+
     /// A new stream per call: `.downloaded` and `.activated`, on a real change only. A stream opened before `start`
     /// receives events once it starts.
     public static func updates() -> AsyncStream<TarjimUpdate> {
@@ -184,9 +201,13 @@ public enum Tarjim {
 
 /// What `Tarjim.checkNow()` found.
 public enum TarjimCheckResult: Equatable, Sendable {
+    /// The server has nothing newer than what the device holds.
     case noChange
+    /// A newer release was downloaded; it is shown at the next opportunity, or by `activatePendingUpdate()`.
     case downloaded
+    /// No request was made: before `start`, or the server asked for a wait after an error that has not passed.
     case notDue
+    /// The check could not complete (network, server or key problem, or a release the SDK would not take).
     case failed
 }
 

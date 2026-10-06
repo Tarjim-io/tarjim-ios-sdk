@@ -69,6 +69,33 @@ final class Runtime: Sendable {
         private var startWaiters: [CheckedContinuation<Void, Never>] = []
         private var proxyInstalled = false
         let readiness = ReadyLatch()
+        private var requestedInFlight: Task<TarjimCheckResult, Never>?
+        private var lastRequested: (at: Date, result: TarjimCheckResult)?
+
+        /// The last request-driven answer while it is younger than `window`, else the check in flight, else a new one.
+        func requestedCheck(now: Date, window: TimeInterval,
+                            run: @escaping @Sendable () async -> TarjimCheckResult) async -> TarjimCheckResult {
+            let task: Task<TarjimCheckResult, Never> = lock.withLock {
+                if let requestedInFlight { return requestedInFlight }
+                // A clock set back must not hold an old answer for longer than the window.
+                if let lastRequested, lastRequested.at <= now, now.timeIntervalSince(lastRequested.at) < window {
+                    let held = lastRequested.result
+                    return Task { held }
+                }
+                let created = Task { await run() }
+                requestedInFlight = created
+                return created
+            }
+            return await task.value
+        }
+
+        /// A `.notDue` answer made no request, so it opens no window.
+        func finishRequested(_ result: TarjimCheckResult, at date: Date) {
+            lock.withLock {
+                requestedInFlight = nil
+                if result != .notDue { lastRequested = (date, result) }
+            }
+        }
 
         /// The timers run exactly while the app is active.
         var isActive: Bool { lock.withLock { probationTask != nil } }
@@ -302,13 +329,34 @@ final class Runtime: Sendable {
         snapshot.selection?.locales.first ?? appLanguage()
     }
 
-    /// One check now, with its report passed to the reporter.
-    @discardableResult
+    /// The shortest time between two request-driven checks.
+    static let requestWindow: TimeInterval = 60
+
     /// One check on the app's request; see `Tarjim.checkNow()`.
     func checkOnRequest() async -> TarjimCheckResult {
-        .notDue
+        // Before `start` has built the engine there is nothing to check.
+        guard let engine = parts.engine else { return .notDue }
+        let parts = self.parts, reporter = self.reporter, now = environment.now
+        return await parts.requestedCheck(now: now(), window: Runtime.requestWindow) {
+            let report = await engine.checkOnRequest()
+            await reporter.cycleFinished(report)
+            let result = Runtime.result(of: report.outcome)
+            parts.finishRequested(result, at: now())
+            return result
+        }
     }
 
+    private static func result(of outcome: CycleOutcome) -> TarjimCheckResult {
+        switch outcome {
+        case .installed: .downloaded
+        case .unchanged, .discardedPending, .skipped, .unreleased: .noChange
+        case .failed, .configurationError, .rejected: .failed
+        case .notDue: .notDue
+        }
+    }
+
+    /// One check now, with its report passed to the reporter.
+    @discardableResult
     func checkNow() async -> CycleReport {
         // Before `start` has built the engine there is nothing to check; try again in an hour.
         guard let engine = parts.engine else { return CycleReport(outcome: .failed, nextCheckIn: 3600) }
