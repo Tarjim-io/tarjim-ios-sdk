@@ -59,15 +59,18 @@ final class RuntimeLaunchTests: XCTestCase {
         XCTAssertTrue(routed)
     }
 
-    /// Nothing stored, so the launch fetches the user's locales; that fetch must not hold `launch`.
+    /// The stored choice names a language the active release lacks, so the launch fetches it; that fetch must not
+    /// hold `launch`.
     func testAServerThatNeverAnswersDoesNotHoldLaunch() async throws {
         let harness = try RuntimeHarness(self)
-        let runtime = try harness.make(transport: SilentTransport())
-        let (ready, title) = await onAThread {
-            (runtime.launch(foreground: true, waitingUpTo: 5), runtime.string("app.only", bundle: nil))
-        }
+        try await installOne(harness)
+        let silent = SilentTransport()
+        let runtime = try harness.make(transport: silent)
+        await runtime.setLanguage("ar")
+        let ready = await onAThread { runtime.launch(foreground: true, waitingUpTo: 5) }
         XCTAssertTrue(ready)
-        XCTAssertEqual(title, "From the app")
+        for _ in 0..<500 where silent.requests.value == 0 { try await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertGreaterThan(silent.requests.value, 0, "the launch went on to the network")
     }
 
     func testPastTheBoundTheLaunchStillCompletes() async throws {
@@ -99,8 +102,36 @@ final class RuntimeLaunchTests: XCTestCase {
 
 /// A server that accepts every request and never answers it.
 private struct SilentTransport: Transport {
+    let requests = TestValue<Int>(0)
+
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.value += 1
         while !Task.isCancelled { try await Task.sleep(nanoseconds: 50_000_000) }
         throw CancellationError()
+    }
+}
+
+final class ReadyLatchTests: XCTestCase {
+    func testAClosedLatchWaitsOutItsBoundAndSaysSo() {
+        let latch = ReadyLatch()
+        XCTAssertFalse(latch.wait(upTo: 0.2))
+        XCTAssertFalse(latch.isOpen)
+    }
+
+    func testAnOpenLatchReturnsAtOnce() {
+        let latch = ReadyLatch()
+        latch.open()
+        latch.open()
+        XCTAssertTrue(latch.wait(upTo: 0))
+        XCTAssertTrue(latch.isOpen)
+    }
+
+    func testOpeningReleasesAWaiter() async {
+        let latch = ReadyLatch()
+        let waited = Task.detached { latch.wait(upTo: 10) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        latch.open()
+        let released = await waited.value
+        XCTAssertTrue(released)
     }
 }

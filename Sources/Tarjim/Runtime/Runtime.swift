@@ -1,5 +1,17 @@
 import Foundation
 
+/// Opened once; `wait` blocks a plain thread (never a task) until it is open or the bound passes.
+final class ReadyLatch: @unchecked Sendable {
+    var isOpen: Bool { true }
+
+    func open() {}
+
+    /// Whether the latch was open by the bound.
+    func wait(upTo bound: TimeInterval) -> Bool {
+        true
+    }
+}
+
 /// One started SDK: the store, the engine, the reporter and the lookups, wired together. `Tarjim` holds one.
 final class Runtime: Sendable {
     struct Environment: Sendable {
