@@ -77,6 +77,15 @@ enum EngineFixtures {
         try Release.one().changing(releaseId: releaseId, slots: [titleSlot: Data("\"app.title\" = \"\(title)\";".utf8)])
     }
 
+    /// Until `condition` holds (at most 10 s, for a slow shared CI machine), then as `settle()`. A fixed pause alone
+    /// only works when the machine is fast enough.
+    static func settle(until condition: () -> Bool) async {
+        for _ in 0..<1_000 where !condition() {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        await settle()
+    }
+
     /// Lets the event stream's task run.
     static func settle() async {
         for _ in 0..<20 { await Task.yield() }

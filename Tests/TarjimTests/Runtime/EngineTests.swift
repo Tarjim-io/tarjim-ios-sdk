@@ -24,7 +24,7 @@ final class EngineActivationTests: XCTestCase {
         let state = await process.state
         XCTAssertNotNil(state.active)
         XCTAssertNil(state.pending)
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { updates.value.count >= 2 })
         XCTAssertEqual(updates.value, [.downloaded, .activated])
         let selection = await process.engine.selection
         XCTAssertEqual(selection, LocaleSelection(kind: .user, locales: ["en"]))
@@ -41,7 +41,7 @@ final class EngineActivationTests: XCTestCase {
         let updates = process.recordUpdates()
         await process.engine.check()
         XCTAssertEqual(process.string("app.title"), "Tarjim")
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { updates.value.count >= 1 })
         XCTAssertEqual(updates.value, [.downloaded])
 
         try process.relaunch()
@@ -69,7 +69,7 @@ final class EngineActivationTests: XCTestCase {
         let activated = await process.engine.activatePendingUpdate()
         XCTAssertTrue(activated)
         XCTAssertEqual(process.string("app.title"), "Tarjim 2")
-        await EngineFixtures.settle()
+        await EngineFixtures.settle(until: { updates.value.count >= 1 })
         XCTAssertEqual(updates.value, [.activated])
         let again = await process.engine.activatePendingUpdate()
         XCTAssertFalse(again, "nothing pending any more")
