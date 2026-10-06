@@ -88,6 +88,25 @@ for await update in Tarjim.updates() {   // .downloaded, .activated — on a rea
 
 A screen already on display is not redrawn by the SDK; refresh it from `.activated` if you need to.
 
+## Checking now
+
+`await Tarjim.checkNow()` asks the server for an update outside the usual schedule, for a pull-to-refresh or a
+"check for updates" button. It downloads but does not show: call `activatePendingUpdate()` for that.
+
+```swift
+if await Tarjim.checkNow() == .downloaded {
+    _ = await Tarjim.activatePendingUpdate()
+}
+```
+
+- `.downloaded`: a newer release arrived. `.noChange`: nothing newer. `.failed`: the check could not complete.
+  `.notDue`: nothing was requested.
+- At most one extra check a minute: within a minute of the last one you get its answer back, and calls made together
+  share one check.
+- It never goes sooner than the server allows after an error (`Retry-After` included); the result is then `.notDue`.
+- It counts as the latest check, so the next scheduled one moves out.
+- The first download, when nothing is held yet, is shown as soon as it is complete, as always.
+
 ## Choosing the language in the app
 
 ```swift
