@@ -16,6 +16,11 @@ final class RuntimeLifecycleTests: XCTestCase {
             let runtime = try harness.make()
             await runtime.start(foreground: true)
             await runtime.becameActive()
+            // Until the scheduled check has installed the release: resigning cancels a check still in flight, and a
+            // shared CI simulator can take far longer than a fixed pause.
+            for _ in 0..<1_000 where runtime.string("app.title", bundle: nil) != "Tarjim" {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
             await EngineFixtures.settle()
             await runtime.resignedActive()
             harness.clock.advance(3600)
