@@ -152,6 +152,16 @@ final class Runtime: Sendable {
 
     deinit { lifecycle.finish() }
 
+    /// The longest `launch` holds its caller: a stuck disk must not hold the main thread until the system ends the launch.
+    static let launchBound: TimeInterval = 1
+
+    /// For `Tarjim.start` on the main thread: installs the main-bundle proxy, starts `start(foreground:)`, and waits up
+    /// to `bound` seconds until lookups serve what this launch shows. Returns whether they do; past the bound they
+    /// catch up in the background. A second call starts nothing.
+    func launch(foreground: Bool, waitingUpTo bound: TimeInterval) -> Bool {
+        false
+    }
+
     /// Launches the engine, cleans up, and reports a revert. Once per instance.
     func start(foreground: Bool) async {
         guard parts.markStarted() else { return }

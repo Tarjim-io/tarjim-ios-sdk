@@ -30,10 +30,10 @@ final class RuntimeHarness {
         return configuration
     }
 
-    func make(_ configuration: TarjimConfiguration? = nil) throws -> Runtime {
+    func make(_ configuration: TarjimConfiguration? = nil, transport: (any Transport)? = nil) throws -> Runtime {
         let clock = self.clock, sleeps = self.sleeps, instantSleeps = self.instantSleeps
         let release = self.releaseBlockedSleeps, appLanguage = self.appLanguage
-        let environment = Runtime.Environment(root: root, transport: server, appBundle: appBundle,
+        let environment = Runtime.Environment(root: root, transport: transport ?? server, appBundle: appBundle,
                                               preferences: { ["en-US"] }, appLanguage: { appLanguage.value }, now: { clock.now },
                                               random: { 0 }, sleep: { seconds in
                                                   sleeps.value.append(seconds)
