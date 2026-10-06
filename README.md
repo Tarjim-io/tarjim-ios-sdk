@@ -99,6 +99,14 @@ Only Tarjim text changes: layout direction, system text and number formats stay 
 the release does not have is ignored — and kept, so it applies once a release adds it. `Tarjim.locale` is the locale
 text is served in.
 
+## Example app
+
+`Examples/TarjimExample` is a small app that shows the SDK end to end: a SwiftUI `Text`, `Tarjim.string`, a storyboard
+label and a plural, updates and activation, and switching the language. Open `Examples/TarjimExample/TarjimExample.xcodeproj`,
+set `TARJIM_EXAMPLE_HOST`, `TARJIM_EXAMPLE_PROJECT_ID` and `TARJIM_EXAMPLE_API_KEY` in the scheme's environment
+variables, and run. It builds against this checkout, not a release. Its UI tests run the same app against a local
+stub server.
+
 ## Reports
 
 ```swift
