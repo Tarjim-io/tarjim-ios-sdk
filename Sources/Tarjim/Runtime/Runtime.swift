@@ -2,13 +2,36 @@ import Foundation
 
 /// Opened once; `wait` blocks a plain thread (never a task) until it is open or the bound passes.
 final class ReadyLatch: @unchecked Sendable {
-    var isOpen: Bool { true }
+    // An NSCondition rather than a semaphore: any number of waiters, and opening is idempotent.
+    private let condition = NSCondition()
+    private var opened = false
 
-    func open() {}
+    var isOpen: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return opened
+    }
+
+    func open() {
+        condition.lock()
+        opened = true
+        condition.broadcast()
+        condition.unlock()
+    }
 
     /// Whether the latch was open by the bound.
     func wait(upTo bound: TimeInterval) -> Bool {
-        true
+        condition.lock()
+        defer { condition.unlock() }
+        // The remaining time is recomputed from a monotonic clock on every wakeup: a wall-clock change must not stretch
+        // the bound, and a spurious wakeup must not end it early.
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, bound) * 1_000_000_000)
+        while !opened {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadline else { break }
+            _ = condition.wait(until: Date(timeIntervalSinceNow: Double(deadline - now) / 1_000_000_000))
+        }
+        return opened
     }
 }
 
@@ -41,9 +64,7 @@ final class Runtime: Sendable {
         private var startWaiters: [CheckedContinuation<Void, Never>] = []
         private var launchBegun = false
         private var proxyInstalled = false
-        private var isReady = false
-        // A condition, not a semaphore: `launch` blocks a plain thread on it, never a task of the cooperative pool.
-        private let readiness = NSCondition()
+        let readiness = ReadyLatch()
 
         /// The timers run exactly while the app is active.
         var isActive: Bool { lock.withLock { probationTask != nil } }
@@ -62,24 +83,6 @@ final class Runtime: Sendable {
                 defer { proxyInstalled = true }
                 return !proxyInstalled
             }
-        }
-
-        func markReady() {
-            readiness.lock()
-            isReady = true
-            readiness.broadcast()
-            readiness.unlock()
-        }
-
-        /// Blocks the calling thread until ready or `bound` seconds pass; returns whether ready.
-        func waitUntilReady(upTo bound: TimeInterval) -> Bool {
-            readiness.lock()
-            defer { readiness.unlock() }
-            let deadline = Date(timeIntervalSinceNow: max(0, bound))
-            while !isReady {
-                guard readiness.wait(until: deadline) else { break }
-            }
-            return isReady
         }
 
         func finishStart() {
@@ -212,9 +215,10 @@ final class Runtime: Sendable {
     func launch(foreground: Bool, waitingUpTo bound: TimeInterval) -> Bool {
         installMainBundleProxy()
         if parts.markLaunchBegun() {
-            Task.detached { [self] in await start(foreground: foreground) }
+            // The caller blocks below, so the launch must not run at a lower priority than the thread it holds up.
+            Task.detached(priority: .userInitiated) { [self] in await start(foreground: foreground) }
         }
-        return parts.waitUntilReady(upTo: bound)
+        return parts.readiness.wait(upTo: bound)
     }
 
     /// Returns once the launch has finished, so what follows it sees the engine.
@@ -231,7 +235,7 @@ final class Runtime: Sendable {
     func start(foreground: Bool) async {
         guard parts.markStarted() else { return }
         // `ready` is idempotent; this covers a launch that ends without the engine reaching it.
-        defer { parts.finishStart(); parts.markReady() }
+        defer { parts.finishStart(); parts.readiness.open() }
         installMainBundleProxy()
         let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: environment.appVersion,
@@ -245,7 +249,7 @@ final class Runtime: Sendable {
             now: environment.now, random: environment.random,
             // An install shown mid-session is proven by the foreground time after it, not before.
             activated: { [self] in parts.restartProbation(makeProbationTask) },
-            ready: { parts.markReady() }))
+            ready: { parts.readiness.open() }))
         parts.engine = engine
         // The stream is opened before the launch so no event is missed.
         let events = engine.updates()
