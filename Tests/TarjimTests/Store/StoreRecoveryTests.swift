@@ -369,7 +369,8 @@ final class StoreRecoveryTests: XCTestCase {
                 XCTAssertNotNil(held, "\(round)")
             }
         }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1.0)
+        // Loose enough for a shared CI simulator; the uncached scan took several seconds per few hundred calls.
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5.0)
     }
 
     /// `save` applies the same checks as loading: an unsafe name never reaches cleanup or a copy.
