@@ -38,6 +38,10 @@ final class StubServer: @unchecked Sendable {
         let objects: [String: Data]
     }
 
+    /// The tests launch the app with this project id.
+    private static let projectId = 1
+    private static let slicesPath = "released/slices/"
+
     private let queue = DispatchQueue(label: "stub-server")
     private let lock = NSLock()
     private var built: Built
@@ -45,6 +49,7 @@ final class StubServer: @unchecked Sendable {
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var sequence = 1
+    private var failing = false
 
     init(release: StubRelease) {
         built = Self.build(release, sequence: 1)
@@ -88,7 +93,7 @@ final class StubServer: @unchecked Sendable {
     }
 
     /// Answers every request from now on with 503, as a server that is down would.
-    func failEverything() {}
+    func failEverything() { lock.withLock { failing = true } }
 
     /// Serves `release` from the next request on.
     func publish(_ release: StubRelease) {
@@ -138,12 +143,15 @@ final class StubServer: @unchecked Sendable {
             headers[String(line[..<colon])] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
         let target = String(parts[1])
-        let current = lock.withLock { () -> Built in
+        let (current, failing) = lock.withLock { () -> (Built, Bool) in
             recorded.append(StubRequest(target: target, headers: headers))
-            return built
+            return (built, self.failing)
         }
-        let (status, extra, body) = Self.answer(target: target, headers: headers, release: current)
-        var response = "HTTP/1.1 \(status) \(status == 200 ? "OK" : status == 304 ? "Not Modified" : "Not Found")\r\n"
+        let (status, extra, body) = failing
+            ? (503, [:], Data())
+            : Self.answer(target: target, headers: headers, release: current)
+        let reason = [200: "OK", 304: "Not Modified", 503: "Service Unavailable"][status] ?? "Not Found"
+        var response = "HTTP/1.1 \(status) \(reason)\r\n"
         for (name, value) in extra { response += "\(name): \(value)\r\n" }
         response += "Content-Length: \(body.count)\r\nConnection: close\r\n\r\n"
         connection.send(content: Data(response.utf8) + body, contentContext: .finalMessage, isComplete: true,
@@ -152,15 +160,17 @@ final class StubServer: @unchecked Sendable {
 
     private static func answer(target: String, headers: [String: String], release: Built) -> (Int, [String: String], Data) {
         let path = target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? target
-        if path.hasSuffix("/delivery/meta") {
+        // Exact paths, project id included: a wrong id or base URL must not be served.
+        let base = "/projects/\(Self.projectId)/delivery/"
+        if path == base + "meta" {
             let match = headers.first { $0.key.lowercased() == "if-none-match" }?.value
             if match == release.etag { return (304, ["ETag": release.etag], Data()) }
             return (200, ["Content-Type": "application/json; charset=utf-8", "ETag": release.etag], release.metaBody)
         }
-        if path.hasSuffix(release.manifestPath) {
+        if path == base + release.manifestPath {
             return (200, ["Content-Type": "application/json; charset=utf-8"], release.manifest)
         }
-        if let bytes = release.objects[(path as NSString).lastPathComponent] {
+        if path.hasPrefix(base + Self.slicesPath), let bytes = release.objects[String(path.dropFirst((base + Self.slicesPath).count))] {
             return (200, ["Content-Type": "application/octet-stream"], bytes)
         }
         return (404, ["Content-Type": "application/problem+json"], Data(#"{"status":404,"code":"not_found","title":"not_found"}"#.utf8))
@@ -194,8 +204,8 @@ final class StubServer: @unchecked Sendable {
         let manifestPath = "released/\(release.releaseId)/manifest"
         let etag = "\"m\(sequence)-\(checksum)\""
         let meta: [String: Any] = [
-            "projectId": 1, "generation": release.releaseId, "checksum": checksum, "schemaVersion": 1,
-            "manifestUrl": manifestPath, "slicesBaseUrl": "released/slices/", "authenticated": true,
+            "projectId": Self.projectId, "generation": release.releaseId, "checksum": checksum, "schemaVersion": 1,
+            "manifestUrl": manifestPath, "slicesBaseUrl": Self.slicesPath, "authenticated": true,
             "track": "ios", "stage": "production", "releaseId": release.releaseId, "sequence": sequence,
             "pollAfter": 60,
         ]
