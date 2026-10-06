@@ -89,6 +89,8 @@ jobs:
       - name: Test
         run: |
           set -euo pipefail
+          # On a fresh runner the first simctl call can fail with "Unable to connect to simulator" until the service is up.
+          xcrun simctl list runtimes >/dev/null
           runtime="com.apple.CoreSimulator.SimRuntime.iOS-26-5"
           device_type="$(xcrun simctl list devicetypes | sed -nE 's/^iPhone 17 \((com\.apple[^)]*)\)$/\1/p' | sed -n 1p)"
           test -n "$device_type"
