@@ -123,11 +123,10 @@ reported. Nothing is sent over the network; without a handler a line goes to the
 ## Privacy
 
 The SDK ships a privacy manifest. It does not track. Update checks carry a `User-Agent` naming the SDK version, the
-app version, the iOS version and the app's language, plus — unless `sendsInstallIdentifier = false` — a random
-identifier the SDK creates per install (new on reinstall and when the key changes), so active installs can be
-counted. Downloads from the CDN carry no header of the SDK's own; the system's default `User-Agent` still goes out. The
-language in the `User-Agent` is the app's language, fixed when the SDK starts; it does not follow `setLanguage` or the
-fallback language.
+app version, the iOS version and the language Tarjim text is shown in, plus — unless
+`sendsInstallIdentifier = false` — a random identifier the SDK creates per install (new on reinstall and when the key
+changes), so active installs can be counted. Downloads from the CDN carry no header of the SDK's own; the system's default `User-Agent` still goes out. The
+language in the `User-Agent` is read at each check, so it follows `setLanguage` and the release's fallback language.
 
 ## Licence
 
