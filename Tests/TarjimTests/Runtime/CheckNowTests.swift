@@ -73,6 +73,7 @@ final class CheckNowTests: XCTestCase {
         XCTAssertEqual(waiting, .notDue, "Retry-After still runs")
         XCTAssertEqual(harness.server.metaRequests.count, requests)
         harness.clock.advance(600)
+        harness.server.publish(try Release.one())
         let after = await runtime.checkOnRequest()
         XCTAssertEqual(after, .noChange)
         XCTAssertEqual(harness.server.metaRequests.count, requests + 1)
