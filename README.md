@@ -45,8 +45,9 @@ Tarjim.start(TarjimConfiguration(
   app's own text in the user's language. A key missing in the user's language never shows another language.
 - The key is sent only in a header, only to `host`. Use a key bound to a track and stage, with read access only.
 
-`start` returns at once; the work happens in the background. Lookups made before the first download is installed
-read the app's own text.
+On the main thread, `start` serves the release already stored on the device before it returns, waiting at most about a
+second for it; the network work happens in the background. Lookups made before the first download is installed
+read the app's own text. Called off the main thread, `start` returns at once and everything happens in the background.
 
 ## Looking up text
 
