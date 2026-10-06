@@ -102,10 +102,11 @@ text is served in.
 ## Example app
 
 `Examples/TarjimExample` is a small app that shows the SDK end to end: a SwiftUI `Text`, `Tarjim.string`, a storyboard
-label and a plural, updates and activation, and switching the language. Open `Examples/TarjimExample/TarjimExample.xcodeproj`,
-set `TARJIM_EXAMPLE_HOST`, `TARJIM_EXAMPLE_PROJECT_ID` and `TARJIM_EXAMPLE_API_KEY` in the scheme's environment
-variables, and run. It builds against this checkout, not a release. Its UI tests run the same app against a local
-stub server.
+label and a plural, updates and activation, and switching the language. Open `Examples/TarjimExample/TarjimExample.xcodeproj`. The project's shared scheme is committed, so do not put your
+key in it: choose Product > Scheme > Manage Schemes, duplicate `TarjimExample`, untick "Shared" on the copy (it is then
+kept in `xcuserdata/`, which git ignores), and set `TARJIM_EXAMPLE_HOST`, `TARJIM_EXAMPLE_PROJECT_ID` and
+`TARJIM_EXAMPLE_API_KEY` in the copy's Run > Arguments > Environment Variables. Never commit a real key. The example
+builds against this checkout, not a release. Its UI tests run the same app against a local stub server.
 
 ## Reports
 
