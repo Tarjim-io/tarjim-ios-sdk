@@ -65,7 +65,7 @@ final class ExampleAppTests: XCTestCase {
         wait(text(second, "storyboard"), toRead: "Storyboard from Tarjim", timeout: 5)
     }
 
-    func testChoosingALanguageChangesOnlyTarjimText() throws {
+    func testChoosingALanguageChangesTarjimText() throws {
         let app = launch(host: try server.start(), reset: true)
         wait(text(app, "status"), toRead: "activated", timeout: firstCheck)
         app.buttons["lang-ar"].tap()
@@ -76,14 +76,14 @@ final class ExampleAppTests: XCTestCase {
         wait(text(app, "proxied"), toRead: "Hello from Tarjim", timeout: 10)
     }
 
-    func testWithoutAServerTheAppShowsItsOwnText() throws {
-        let host = try server.start()
-        server.stop()
-        let app = launch(host: host, reset: true)
+    func testWhenTheServerFailsTheAppShowsItsOwnText() throws {
+        server.failEverything()
+        let app = launch(host: try server.start(), reset: true)
         wait(text(app, "proxied"), toRead: "Hello from the app", timeout: 10)
         wait(text(app, "storyboard"), toRead: "Storyboard from the app", timeout: 5)
         // Past the longest launch delay, so the failed check has happened.
         _ = XCTWaiter().wait(for: [XCTestExpectation(description: "first check")], timeout: 35)
+        XCTAssertFalse(server.requests.isEmpty, "the app asked and was refused")
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertEqual(text(app, "status").label, "none")
         XCTAssertEqual(text(app, "proxied").label, "Hello from the app")
@@ -94,6 +94,9 @@ final class ExampleAppTests: XCTestCase {
         wait(text(app, "status"), toRead: "activated", timeout: firstCheck)
         server.publish(.second)
         wait(text(app, "status"), toRead: "downloaded", timeout: secondCheck)
+        // Long enough for a wrong activation to show; nothing may change before the tap.
+        _ = XCTWaiter().wait(for: [XCTestExpectation(description: "settle")], timeout: 3)
+        XCTAssertEqual(text(app, "status").label, "downloaded")
         XCTAssertEqual(text(app, "proxied").label, "Hello from Tarjim")
         app.buttons["activate"].tap()
         wait(text(app, "proxied"), toRead: "Hello again from Tarjim", timeout: 10)
@@ -108,7 +111,7 @@ final class ExampleAppTests: XCTestCase {
         for request in requests {
             XCTAssertFalse(request.target.contains(apiKey), request.target)
             let named = request.headers.first { $0.key.lowercased() == "x-tarjim-apikey" }
-            if request.target.contains("/delivery/meta") { XCTAssertEqual(named?.value, apiKey, request.target) }
+            XCTAssertEqual(named?.value, apiKey, request.target)
             for (name, value) in request.headers where name.lowercased() != "x-tarjim-apikey" {
                 XCTAssertFalse(value.contains(apiKey), "\(name) carries the key")
             }
