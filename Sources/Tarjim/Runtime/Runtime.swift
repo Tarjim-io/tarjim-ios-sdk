@@ -25,6 +25,11 @@ final class ReadyLatch: @unchecked Sendable {
         defer { condition.unlock() }
         // The remaining time is recomputed from a monotonic clock on every wakeup: a wall-clock change must not stretch
         // the bound, and a spurious wakeup must not end it early.
+        // A bound that does not fit the clock means no bound; converting it would trap.
+        guard bound < 10_000_000 else {
+            while !opened { condition.wait() }
+            return true
+        }
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, bound) * 1_000_000_000)
         while !opened {
             let now = DispatchTime.now().uptimeNanoseconds
@@ -62,20 +67,11 @@ final class Runtime: Sendable {
         private var resignedAt: Date?
         private var startFinished = false
         private var startWaiters: [CheckedContinuation<Void, Never>] = []
-        private var launchBegun = false
         private var proxyInstalled = false
         let readiness = ReadyLatch()
 
         /// The timers run exactly while the app is active.
         var isActive: Bool { lock.withLock { probationTask != nil } }
-
-        /// True the first time only.
-        func markLaunchBegun() -> Bool {
-            lock.withLock {
-                defer { launchBegun = true }
-                return !launchBegun
-            }
-        }
 
         /// True the first time only.
         func markProxyInstalled() -> Bool {
@@ -214,11 +210,14 @@ final class Runtime: Sendable {
     /// catch up in the background. A second call starts nothing.
     func launch(foreground: Bool, waitingUpTo bound: TimeInterval) -> Bool {
         installMainBundleProxy()
-        if parts.markLaunchBegun() {
-            // The caller blocks below, so the launch must not run at a lower priority than the thread it holds up.
-            Task.detached(priority: .userInitiated) { [self] in await start(foreground: foreground) }
+        // The caller blocks below, so the launch runs at a high priority: the blocked main thread must not be left
+        // waiting behind lower-priority work. `start` does nothing on a second call.
+        Task.detached(priority: .userInitiated) { [self] in await start(foreground: foreground) }
+        let ready = parts.readiness.wait(upTo: bound)
+        if !ready {
+            Log.debug("The stored release was not ready within the launch bound; lookups catch up in the background")
         }
-        return parts.readiness.wait(upTo: bound)
+        return ready
     }
 
     /// Returns once the launch has finished, so what follows it sees the engine.

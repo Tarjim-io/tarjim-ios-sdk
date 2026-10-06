@@ -77,7 +77,8 @@ public enum Tarjim {
         observeLifecycle(of: runtime)
         if Thread.isMainThread {
             let active = isActiveOnMainThread()
-            // The wait applies to a background launch too: lookups there (notification text, for one) need the stored release.
+            // The wait applies to a background launch too: lookups there (notification text, for one) need the
+            // stored release.
             _ = runtime.launch(foreground: active, waitingUpTo: Runtime.launchBound)
             if active {
                 Task.detached {
