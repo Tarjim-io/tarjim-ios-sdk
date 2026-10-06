@@ -33,8 +33,9 @@ final class RuntimeLaunchTests: XCTestCase {
     func testAPendingReleaseIsShownByTheColdStartBeforeLaunchReturns() async throws {
         let harness = try RuntimeHarness(self)
         try await installOne(harness)
+        // In the background, so this process isn't counted as a second cut-short launch, which would revert.
         let second = try harness.make()
-        await second.start(foreground: true)
+        await second.start(foreground: false)
         harness.server.publish(try EngineFixtures.release(title: "Tarjim 2", releaseId: 43))
         harness.clock.advance(3600)
         await second.checkNow()
