@@ -97,28 +97,28 @@ actor Engine {
 
     /// Runs one update cycle if due and acts on its result.
     @discardableResult
-    func check() async -> CycleReport {
-        // Before launch has begun a cycle could install and activate ahead of the crash count.
-        guard let launchTask else { return CycleReport(outcome: .notDue, nextCheckIn: 0) }
-        await launchTask.value
-        await refreshOverride()
-        let state = await environment.store.state
-        let known = (state.pending ?? state.active)?.checksum
-        let report = await cycle.run()
-        await handle(report, knownChecksum: known)
-        return report
+    func check() async -> CycleReport { await checkShared().report }
+
+    /// `joined`: the cycle was another caller's, which acts on its result; this caller must not.
+    func checkShared() async -> UpdateCycle.Shared {
+        await shared(ignoringCadence: false)
     }
 
     /// One cycle on the app's request: reads `meta` outside the cadence, and acts on the result as `check()` does.
-    func checkOnRequest() async -> CycleReport {
-        guard let launchTask else { return CycleReport(outcome: .notDue, nextCheckIn: 0) }
+    func checkOnRequest() async -> UpdateCycle.Shared {
+        await shared(ignoringCadence: true)
+    }
+
+    private func shared(ignoringCadence: Bool) async -> UpdateCycle.Shared {
+        // Before launch has begun a cycle could install and activate ahead of the crash count.
+        guard let launchTask else { return UpdateCycle.Shared(report: CycleReport(outcome: .notDue, nextCheckIn: 0), joined: false) }
         await launchTask.value
         await refreshOverride()
         let state = await environment.store.state
         let known = (state.pending ?? state.active)?.checksum
-        let report = await cycle.runNow()
-        await handle(report, knownChecksum: known)
-        return report
+        let result = ignoringCadence ? await cycle.runNowShared() : await cycle.runShared()
+        if !result.joined { await handle(result.report, knownChecksum: known) }
+        return result
     }
 
     /// Stores the language the app asked for (nil: follow the app's language again) and serves it if the release has it.
