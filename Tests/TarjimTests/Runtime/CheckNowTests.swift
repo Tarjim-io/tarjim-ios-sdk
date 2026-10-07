@@ -418,4 +418,78 @@ final class CheckNowTests: XCTestCase {
         XCTAssertEqual(result, .downloaded)
         XCTAssertEqual(title, "Tarjim")
     }
+
+    // MARK: Across a relaunch, and the other answers
+
+    func testARelaunchDuringAScheduledRetryAfterStillHoldsRequests() async throws {
+        for setBack in [false, true] {
+            let harness = try RuntimeHarness(self)
+            _ = try await scheduledRetryAfter(harness)
+            let next = try harness.make()
+            await next.start(foreground: true)
+            let requests = harness.server.metaRequests.count
+            if setBack { harness.clock.jump(-5) } else { harness.clock.advance(61) }
+            let during = await next.checkOnRequest()
+            XCTAssertEqual(during, .notDue, "date set back: \(setBack)")
+            XCTAssertEqual(harness.server.metaRequests.count, requests, "date set back: \(setBack)")
+        }
+    }
+
+    /// The schedule joining a request's cycle: one event, and the missing file counted once for the cycle.
+    func testTheScheduleJoiningARequestCountsOnce() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await installOne(harness)
+        let seen = TestValue<[TarjimUpdate]>([])
+        let stream = runtime.updates()
+        Task { for await update in stream { seen.value.append(update) } }
+        let two = try EngineFixtures.release(title: "Tarjim 2", releaseId: 43)
+        harness.server.publish(two)
+        let gone = FakeTransport.Answer(status: 404)
+        harness.server.answerObject(hash: try two.hash(of: EngineFixtures.titleSlot), fileType: "strings",
+                                    gone, gone, gone, gone, gone, gone, gone, gone)
+        harness.clock.advance(1800)
+        let gate = Gate()
+        harness.server.onObjectRequest = { gate.hold() }
+        let requested = Task { await runtime.checkOnRequest() }
+        try await gate.waitUntilHeld()
+        let scheduled = Task { await runtime.checkNow() }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        gate.open()
+        _ = await requested.value
+        _ = await scheduled.value
+        harness.clock.advance(4000)
+        await runtime.checkNow()
+        await EngineFixtures.settle(until: { !seen.value.isEmpty })
+        XCTAssertEqual(seen.value.filter { $0 == .downloaded }.count, 1)
+        XCTAssertEqual(harness.reports.value.map(\.kind), [])
+    }
+
+    /// Below the runtime's own guard: an engine launched in the background never shows a requested download.
+    func testARequestInABackgroundLaunchShowsNothing() async throws {
+        let process = try AppProcess(self)
+        process.server.publish(try Release.one())
+        await process.engine.launch(foreground: false)
+        _ = await process.engine.checkOnRequest()
+        let state = await process.state
+        XCTAssertNil(state.active)
+    }
+
+    func testARequestedCheckReachesTheReportHandler() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await installOne(harness)
+        harness.server.publish(try Release.one().changing(releaseId: 43, fields: ["schemaVersion": 2]))
+        harness.clock.advance(120)
+        _ = await runtime.checkOnRequest()
+        await EngineFixtures.settle(until: { !harness.reports.value.isEmpty })
+        XCTAssertFalse(harness.reports.value.isEmpty)
+    }
+
+    func testNothingReleasedYetIsNoChange() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await installOne(harness)
+        harness.server.answerMeta(CycleFixtures.problem(404, code: "delivery.stage_unreleased", pollAfter: 900))
+        harness.clock.advance(120)
+        let result = await runtime.checkOnRequest()
+        XCTAssertEqual(result, .noChange)
+    }
 }
