@@ -139,7 +139,8 @@ final class FixtureSetTests: XCTestCase {
                 // A monotone counter in unix seconds, never a date string.
                 XCTAssertTrue(body["resultsLastUpdate"] is NSNull || body["resultsLastUpdate"] is Int, "\(label) resultsLastUpdate")
                 let pollAfter = try XCTUnwrap(body["pollAfter"] as? Int, label)
-                XCTAssertTrue((60...3600).contains(pollAfter), label)
+                // Any value the SDK accepts: it clamps `pollAfter` to a minute…a day, whatever the server's menu is.
+                XCTAssertTrue((60...86_400).contains(pollAfter), label)
 
                 let tag = try XCTUnwrap(envelope.header("ETag"), "\(label) ETag")
                 let match = try XCTUnwrap(etag.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)), "\(label) ETag \(tag)")
