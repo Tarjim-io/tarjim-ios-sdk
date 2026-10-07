@@ -49,8 +49,9 @@ final class Runtime: Sendable {
         let preferences: @Sendable () -> [String]
         let appLanguage: @Sendable () -> String
         let now: @Sendable () -> Date
-        /// Seconds on a clock that never goes back, whatever the user does to the date, and that counts time spent
-        /// asleep. Only differences mean anything.
+        /// Seconds on a clock that never goes back, whatever the user does to the date. It pauses while the device
+        /// sleeps, so a wait measured on it can only last longer than the server asked, never shorter. Only
+        /// differences mean anything.
         let uptime: @Sendable () -> TimeInterval
         let random: @Sendable () -> Double
         /// Waits between scheduled checks.

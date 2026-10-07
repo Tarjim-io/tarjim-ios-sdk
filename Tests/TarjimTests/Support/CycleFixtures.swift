@@ -92,7 +92,7 @@ final class Device {
         let clock = self.clock, selection = self.selection
         let client = DeliveryClient(endpoint: try DeliveryFixtures.endpoint(), identity: DeliveryFixtures.identity, transport: server)
         return UpdateCycle(CycleEnvironment(client: client, store: store, now: { clock.now }, random: { 0 },
-                                            selectLocales: { selection.select($0) }))
+                                            selectLocales: { selection.select($0) }, uptime: { clock.uptime }))
     }
 
     /// A new process: a fresh Store over the same root, so state.json is read back from disk.

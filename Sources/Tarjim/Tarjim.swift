@@ -210,8 +210,8 @@ public enum TarjimCheckResult: Equatable, Sendable {
     /// New text was downloaded; it is shown at the next opportunity, or by `activatePendingUpdate()`. The first
     /// download is shown at once, only when nothing is held yet.
     case downloaded
-    /// No request was made: the app is not active, `start` has not run (or is not finished), or the server asked for
-    /// a wait after an error that has not passed.
+    /// No request was made: the app is not active, `start` has not run (or is not finished), or a wait after a
+    /// failed or interrupted check has not passed.
     case notDue
     /// The check could not complete (network, server or key problem, or a release the SDK would not take).
     case failed
