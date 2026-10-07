@@ -7,9 +7,22 @@ final class TestClock: @unchecked Sendable {
     private let lock = NSLock()
     private var current = Date(timeIntervalSince1970: 1_790_000_000)
 
-    var now: Date { lock.withLock { current } }
+    private var elapsed: TimeInterval = 0
 
+    var now: Date { lock.withLock { current } }
+    /// Time the device has run; it never goes back, whatever the wall clock does.
+    var uptime: TimeInterval { lock.withLock { elapsed } }
+
+    /// Time passing. A negative value is the wall clock set back; uptime stays.
     func advance(_ seconds: TimeInterval) {
+        lock.withLock {
+            current = current.addingTimeInterval(seconds)
+            if seconds > 0 { elapsed += seconds }
+        }
+    }
+
+    /// The user changing the date: only the wall clock moves.
+    func jump(_ seconds: TimeInterval) {
         lock.withLock { current = current.addingTimeInterval(seconds) }
     }
 }
