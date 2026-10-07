@@ -189,7 +189,8 @@ final class Runtime: Sendable {
         let queue = lifecycle
         resolver = Resolver(app: AppResources(bundle: environment.appBundle, language: environment.appLanguage()),
                             defaultBundle: configuration.defaultBundle, snapshot: { snapshots.current })
-        // Weak, so a runtime nobody holds can end, started or not; its deinit finishes the stream.
+        // Weak, so a runtime nobody holds can end once its timers stop (they run only while the app is active); its
+        // deinit finishes the stream.
         Task { [weak self] in
             for await _ in queue.wakeups {
                 // Changes that arrived together net out: a resign straight followed by a become leaves the app active.

@@ -127,8 +127,9 @@ app version, the iOS version and the language selected for Tarjim text, plus —
 — a random identifier the SDK creates per install (new on reinstall and when the key changes), so active installs can
 be counted. Downloads from the CDN carry no header of the SDK's own; the system's default `User-Agent` still goes out.
 
-The language is read at each check. It follows `setLanguage` once the release has that language, and otherwise the
-fallback language. It can name a language whose files are still downloading.
+The language is the one `Tarjim.locale` reports, read at each check: the language chosen with `setLanguage` if the
+release has it, else the user's language if the release has it, else the fallback language. It can name a language whose
+files are still downloading.
 
 ## Licence
 
