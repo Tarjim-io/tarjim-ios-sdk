@@ -230,6 +230,8 @@ final class CheckNowTests: XCTestCase {
     func testACycleSharedWithTheScheduleCountsOnce() async throws {
         let harness = try RuntimeHarness(self)
         let runtime = try await installOne(harness)
+        // The first install's own events are still on their way; a stream opened now would hear them.
+        await EngineFixtures.settle()
         let seen = TestValue<[TarjimUpdate]>([])
         let stream = runtime.updates()
         Task { for await update in stream { seen.value.append(update) } }
@@ -439,6 +441,8 @@ final class CheckNowTests: XCTestCase {
     func testTheScheduleJoiningARequestCountsOnce() async throws {
         let harness = try RuntimeHarness(self)
         let runtime = try await installOne(harness)
+        // The first install's own events are still on their way; a stream opened now would hear them.
+        await EngineFixtures.settle()
         let seen = TestValue<[TarjimUpdate]>([])
         let stream = runtime.updates()
         Task { for await update in stream { seen.value.append(update) } }
