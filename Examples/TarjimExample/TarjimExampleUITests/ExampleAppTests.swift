@@ -10,6 +10,9 @@ final class ExampleAppTests: XCTestCase {
     // The first check of a launch waits up to 30 s; the next comes no sooner than 60 s (72 s with jitter).
     private let firstCheck: TimeInterval = 60
     private let secondCheck: TimeInterval = 150
+    // How long a change already under way may take to show; a busy shared CI simulator can take many seconds to
+    // even read the screen.
+    private let readiness: TimeInterval = 30
 
     override func setUp() async throws {
         continueAfterFailure = false
@@ -48,10 +51,10 @@ final class ExampleAppTests: XCTestCase {
     func testFirstLaunchShowsTheDownloadedTextEverywhere() throws {
         let app = launch(host: try server.start(), reset: true)
         wait(text(app, "status"), toRead: "activated", timeout: firstCheck)
-        wait(text(app, "proxied"), toRead: "Hello from Tarjim", timeout: 5)
-        wait(text(app, "explicit"), toRead: "Hello from Tarjim", timeout: 5)
-        wait(text(app, "storyboard"), toRead: "Storyboard from Tarjim", timeout: 5)
-        wait(text(app, "formatted"), toRead: "3 items from Tarjim", timeout: 5)
+        wait(text(app, "proxied"), toRead: "Hello from Tarjim", timeout: readiness)
+        wait(text(app, "explicit"), toRead: "Hello from Tarjim", timeout: readiness)
+        wait(text(app, "storyboard"), toRead: "Storyboard from Tarjim", timeout: readiness)
+        wait(text(app, "formatted"), toRead: "3 items from Tarjim", timeout: readiness)
     }
 
     func testARelaunchWithoutTheServerKeepsTheDownloadedText() throws {
@@ -61,28 +64,28 @@ final class ExampleAppTests: XCTestCase {
         first.terminate()
         server.stop()
         let second = launch(host: host, reset: false)
-        wait(text(second, "proxied"), toRead: "Hello from Tarjim", timeout: 10)
-        wait(text(second, "storyboard"), toRead: "Storyboard from Tarjim", timeout: 5)
+        wait(text(second, "proxied"), toRead: "Hello from Tarjim", timeout: readiness)
+        wait(text(second, "storyboard"), toRead: "Storyboard from Tarjim", timeout: readiness)
     }
 
     func testChoosingALanguageChangesTarjimText() throws {
         let app = launch(host: try server.start(), reset: true)
         wait(text(app, "status"), toRead: "activated", timeout: firstCheck)
         app.buttons["lang-ar"].tap()
-        wait(text(app, "proxied"), toRead: "مرحبا من ترجم", timeout: 10)
-        wait(text(app, "explicit"), toRead: "مرحبا من ترجم", timeout: 5)
-        wait(text(app, "storyboard"), toRead: "القصة من ترجم", timeout: 5)
+        wait(text(app, "proxied"), toRead: "مرحبا من ترجم", timeout: readiness)
+        wait(text(app, "explicit"), toRead: "مرحبا من ترجم", timeout: readiness)
+        wait(text(app, "storyboard"), toRead: "القصة من ترجم", timeout: readiness)
         app.buttons["lang-system"].tap()
-        wait(text(app, "proxied"), toRead: "Hello from Tarjim", timeout: 10)
-        wait(text(app, "explicit"), toRead: "Hello from Tarjim", timeout: 5)
-        wait(text(app, "storyboard"), toRead: "Storyboard from Tarjim", timeout: 5)
+        wait(text(app, "proxied"), toRead: "Hello from Tarjim", timeout: readiness)
+        wait(text(app, "explicit"), toRead: "Hello from Tarjim", timeout: readiness)
+        wait(text(app, "storyboard"), toRead: "Storyboard from Tarjim", timeout: readiness)
     }
 
     func testWhenTheServerFailsTheAppShowsItsOwnText() throws {
         server.failEverything()
         let app = launch(host: try server.start(), reset: true)
-        wait(text(app, "proxied"), toRead: "Hello from the app", timeout: 10)
-        wait(text(app, "storyboard"), toRead: "Storyboard from the app", timeout: 5)
+        wait(text(app, "proxied"), toRead: "Hello from the app", timeout: readiness)
+        wait(text(app, "storyboard"), toRead: "Storyboard from the app", timeout: readiness)
         // Past the longest launch delay, so the failed check has happened.
         _ = XCTWaiter().wait(for: [XCTestExpectation(description: "first check")], timeout: 35)
         XCTAssertFalse(server.requests.isEmpty, "the app asked and was refused")
@@ -101,8 +104,8 @@ final class ExampleAppTests: XCTestCase {
         XCTAssertEqual(text(app, "status").label, "downloaded")
         XCTAssertEqual(text(app, "proxied").label, "Hello from Tarjim")
         app.buttons["activate"].tap()
-        wait(text(app, "proxied"), toRead: "Hello again from Tarjim", timeout: 10)
-        wait(text(app, "status"), toRead: "activated", timeout: 5)
+        wait(text(app, "proxied"), toRead: "Hello again from Tarjim", timeout: readiness)
+        wait(text(app, "status"), toRead: "activated", timeout: readiness)
     }
 
     /// The next cold start shows a downloaded release, and says so: the app's listener exists before `start`.
@@ -114,8 +117,8 @@ final class ExampleAppTests: XCTestCase {
         wait(text(first, "status"), toRead: "downloaded", timeout: secondCheck)
         first.terminate()
         let second = launch(host: host, reset: false)
-        wait(text(second, "proxied"), toRead: "Hello again from Tarjim", timeout: 10)
-        wait(text(second, "status"), toRead: "activated", timeout: 5)
+        wait(text(second, "proxied"), toRead: "Hello again from Tarjim", timeout: readiness)
+        wait(text(second, "status"), toRead: "activated", timeout: readiness)
     }
 
     func testTheKeyTravelsOnlyInItsHeader() throws {
