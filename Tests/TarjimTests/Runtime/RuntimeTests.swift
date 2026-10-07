@@ -34,7 +34,7 @@ final class RuntimeHarness {
         let clock = self.clock, sleeps = self.sleeps, instantSleeps = self.instantSleeps
         let release = self.releaseBlockedSleeps, appLanguage = self.appLanguage
         let environment = Runtime.Environment(root: root, transport: transport ?? server, appBundle: appBundle,
-                                              preferences: { ["en-US"] }, appLanguage: { appLanguage.value }, now: { clock.now },
+                                              preferences: { ["en-US"] }, appLanguage: { appLanguage.value }, now: { clock.now }, uptime: { clock.uptime },
                                               random: { 0 }, sleep: { seconds in
                                                   sleeps.value.append(seconds)
                                                   if sleeps.value.count > instantSleeps.value {

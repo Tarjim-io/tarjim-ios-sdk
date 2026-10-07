@@ -160,7 +160,7 @@ public enum Tarjim {
         return Runtime.Environment(
             root: root, transport: URLSessionTransport(), appBundle: .main,
             preferences: { Locale.preferredLanguages }, appLanguage: { Runtime.appLanguage(of: .main) },
-            now: { Date() }, random: { Double.random(in: 0..<1) },
+            now: { Date() }, uptime: { TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000 }, random: { Double.random(in: 0..<1) },
             sleep: { seconds in
                 guard seconds.isFinite, seconds > 0 else { return }
                 try? await Task.sleep(nanoseconds: UInt64(min(seconds, 86_400) * 1_000_000_000))

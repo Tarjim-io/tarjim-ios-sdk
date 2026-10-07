@@ -49,6 +49,8 @@ final class Runtime: Sendable {
         let preferences: @Sendable () -> [String]
         let appLanguage: @Sendable () -> String
         let now: @Sendable () -> Date
+        /// Seconds since boot; never goes back when the user changes the date.
+        let uptime: @Sendable () -> TimeInterval
         let random: @Sendable () -> Double
         /// Waits between scheduled checks.
         let sleep: @Sendable (TimeInterval) async -> Void
