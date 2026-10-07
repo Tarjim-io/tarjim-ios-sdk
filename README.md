@@ -100,13 +100,14 @@ if await Tarjim.checkNow() == .downloaded {
 ```
 
 - `.downloaded`: new text was downloaded. `.noChange`: nothing new to download. `.failed`: the check could not
-  complete. `.notDue`: nothing was requested.
+  complete. `.notNow`: nothing was requested, because it is too soon or the app is not active; nothing is wrong, and
+  most apps treat it like `.noChange`.
 - It runs only while the app is active, like the scheduled checks: in the background, or before `start`, the result
-  is `.notDue`.
+  is `.notNow`.
 - At most one check a minute, because the server caches the answer it reads for a minute. A call within the minute
   gets the previous answer again, `.failed` included, and calls made together share one check.
 - It never goes sooner than the server allows after an error: once that minute has passed, while the wait (`Retry-After`
-  included) has not, the result is `.notDue`.
+  included) has not, the result is `.notNow`.
 - It counts as the latest check, so the next scheduled one counts from it.
 - It does not show what it downloads. The exception is the first download, shown at once only when nothing is held yet.
 

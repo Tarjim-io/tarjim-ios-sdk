@@ -132,20 +132,20 @@ public enum Tarjim {
     /// Checks for an update now, outside the server's schedule, and returns what it found.
     ///
     /// - It runs only while the app is active, like the scheduled checks: in the background, or before `start`, the
-    ///   result is `.notDue` and nothing is requested.
+    ///   result is `.notNow` and nothing is requested.
     /// - At most one check a minute, because the server caches the answer it reads for a minute. A call within the
     ///   minute returns the previous answer again, `.failed` included, without a request, and calls made together
     ///   share one check.
     /// - Never sooner than the server allows after an error: once that minute has passed, while a wait it asked for
-    ///   (`Retry-After` included) has not, the result is `.notDue` and nothing is requested.
+    ///   (`Retry-After` included) has not, the result is `.notNow` and nothing is requested.
     /// - It counts as the latest check, so the next scheduled one counts from it.
     /// - It downloads but does not show: use `activatePendingUpdate()` to show the update now. The one exception is
     ///   the first download, shown as soon as it is complete when nothing is held yet.
     ///
-    /// Results: `.downloaded` new text was downloaded; `.noChange` nothing new to download; `.notDue` no request was
+    /// Results: `.downloaded` new text was downloaded; `.noChange` nothing new to download; `.notNow` no request was
     /// made; `.failed` the check could not complete.
     public static func checkNow() async -> TarjimCheckResult {
-        guard let runtime = box.current else { return .notDue }
+        guard let runtime = box.current else { return .notNow }
         return await runtime.checkOnRequest()
     }
 
@@ -211,8 +211,8 @@ public enum TarjimCheckResult: Equatable, Sendable {
     /// download is shown at once, only when nothing is held yet.
     case downloaded
     /// No request was made: the app is not active, `start` has not run (or is not finished), or a wait after a
-    /// failed or interrupted check has not passed.
-    case notDue
+    /// failed or interrupted check has not passed. Nothing is wrong; most apps treat it like `.noChange`.
+    case notNow
     /// The check could not complete (network, server or key problem, or a release the SDK would not take).
     case failed
 }

@@ -70,7 +70,7 @@ final class CheckNowTests: XCTestCase {
         let requests = harness.server.metaRequests.count
         harness.clock.advance(61)
         let waiting = await runtime.checkOnRequest()
-        XCTAssertEqual(waiting, .notDue, "Retry-After still runs")
+        XCTAssertEqual(waiting, .notNow, "Retry-After still runs")
         XCTAssertEqual(harness.server.metaRequests.count, requests)
         harness.clock.advance(600)
         harness.server.publish(try Release.one())
@@ -97,7 +97,7 @@ final class CheckNowTests: XCTestCase {
         harness.server.publish(try Release.one())
         let runtime = try harness.make()
         let result = await runtime.checkOnRequest()
-        XCTAssertEqual(result, .notDue)
+        XCTAssertEqual(result, .notNow)
         XCTAssertEqual(harness.server.requests.count, 0)
     }
 
@@ -155,7 +155,7 @@ final class CheckNowTests: XCTestCase {
         harness.clock.advance(61)
         harness.clock.jump(-3600)
         let during = await runtime.checkOnRequest()
-        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(during, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -176,7 +176,7 @@ final class CheckNowTests: XCTestCase {
         let requests = harness.server.metaRequests.count
         harness.clock.advance(61)
         let during = await runtime.checkOnRequest()
-        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(during, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -206,7 +206,7 @@ final class CheckNowTests: XCTestCase {
         _ = await runtime.checkOnRequest()
         harness.clock.advance(61)
         let waiting = await runtime.checkOnRequest()
-        XCTAssertEqual(waiting, .notDue)
+        XCTAssertEqual(waiting, .notNow)
         harness.server.publish(try Release.one())
         harness.clock.advance(30)
         let requests = harness.server.metaRequests.count
@@ -281,7 +281,7 @@ final class CheckNowTests: XCTestCase {
         let runtime = try harness.make()
         await runtime.start(foreground: false)
         let result = await runtime.checkOnRequest()
-        XCTAssertEqual(result, .notDue)
+        XCTAssertEqual(result, .notNow)
         XCTAssertEqual(harness.server.requests.count, 0)
     }
 
@@ -293,7 +293,7 @@ final class CheckNowTests: XCTestCase {
         harness.clock.advance(120)
         let requests = harness.server.metaRequests.count
         let result = await runtime.checkOnRequest()
-        XCTAssertEqual(result, .notDue)
+        XCTAssertEqual(result, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -326,7 +326,7 @@ final class CheckNowTests: XCTestCase {
         let requests = harness.server.metaRequests.count
         harness.clock.advance(61)
         let during = await runtime.checkOnRequest()
-        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(during, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -336,7 +336,7 @@ final class CheckNowTests: XCTestCase {
         let requests = harness.server.metaRequests.count
         harness.clock.advance(61)
         let during = await runtime.checkOnRequest()
-        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(during, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -346,7 +346,7 @@ final class CheckNowTests: XCTestCase {
         let requests = harness.server.metaRequests.count
         harness.clock.jump(-5)
         let during = await runtime.checkOnRequest()
-        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(during, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -357,7 +357,7 @@ final class CheckNowTests: XCTestCase {
         harness.clock.advance(5)
         harness.clock.jump(700)
         let during = await runtime.checkOnRequest()
-        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(during, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -372,7 +372,7 @@ final class CheckNowTests: XCTestCase {
         async let scheduled = runtime.checkNow()
         async let requested = runtime.checkOnRequest()
         let (_, result) = await (scheduled, requested)
-        XCTAssertEqual(result, .notDue)
+        XCTAssertEqual(result, .notNow)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
 
@@ -430,7 +430,7 @@ final class CheckNowTests: XCTestCase {
             let requests = harness.server.metaRequests.count
             if setBack { harness.clock.jump(-5) } else { harness.clock.advance(61) }
             let during = await next.checkOnRequest()
-            XCTAssertEqual(during, .notDue, "date set back: \(setBack)")
+            XCTAssertEqual(during, .notNow, "date set back: \(setBack)")
             XCTAssertEqual(harness.server.metaRequests.count, requests, "date set back: \(setBack)")
         }
     }
