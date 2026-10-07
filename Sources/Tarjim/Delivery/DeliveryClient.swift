@@ -1,7 +1,7 @@
 import Foundation
 
-/// `meta`, manifest and object requests over an injected transport. Pure: no state, no clock,
-/// no file system. Every answer is a typed outcome; nothing here throws.
+/// `meta`, manifest and object requests over an injected transport. Holds no state of its own, and no clock
+/// or file system. Every answer is a typed outcome; nothing here throws.
 struct DeliveryClient: Sendable {
     let endpoint: DeliveryEndpoint
     let identity: ClientIdentity
