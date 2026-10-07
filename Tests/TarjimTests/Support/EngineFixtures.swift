@@ -45,7 +45,8 @@ final class AppProcess {
         let clock = self.clock, preferences = self.preferences, appLanguage = self.appLanguage
         return Engine(EngineEnvironment(store: store, client: client, snapshots: snapshots,
                                         preferences: { preferences.value }, appLanguage: { appLanguage.value },
-                                        fallbackLanguage: "en", now: { clock.now }, random: { 0 }))
+                                        fallbackLanguage: "en", now: { clock.now }, random: { 0 },
+                                        uptime: { clock.uptime }))
     }
 
     /// What a lookup returns now, through the snapshot the engine swapped in.

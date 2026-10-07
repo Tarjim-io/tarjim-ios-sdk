@@ -7,22 +7,17 @@ struct CycleEnvironment: Sendable {
     let now: @Sendable () -> Date
     /// In 0..<1; the jitter source.
     let random: @Sendable () -> Double
-    /// The manifest's locale keys → the ones to serve, most specific first (chunk 5 wires LocaleSelector).
+    /// The manifest's locale keys → the ones to serve, most specific first.
     let selectLocales: @Sendable ([String]) -> [String]
-    /// Seconds on a clock that never goes back and keeps counting while the device sleeps.
-    var uptime: @Sendable () -> TimeInterval = MonotonicClock.seconds
+    /// Seconds on a clock that never goes back. It pauses while the device sleeps, so a wait measured on it can
+    /// only last longer than the server asked, never shorter.
+    let uptime: @Sendable () -> TimeInterval
 }
 
-/// A clock for waits that must neither follow the user's date nor pause while the device sleeps.
+/// A clock for waits that must not follow the user's date.
 enum MonotonicClock {
-    private static let ticksToSeconds: Double = {
-        var info = mach_timebase_info_data_t()
-        mach_timebase_info(&info)
-        return Double(info.numer) / Double(max(info.denom, 1)) / 1_000_000_000
-    }()
-
     static func seconds() -> TimeInterval {
-        Double(mach_continuous_time()) * ticksToSeconds
+        Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
     }
 }
 
@@ -50,7 +45,7 @@ enum CycleOutcome: Equatable, Sendable {
     case skipped
     /// 404 with nothing released to this stage yet.
     case unreleased
-    /// A key or binding problem (400, 401, 403, a missing track or stage): reported by chunk 5; polling continues.
+    /// A key or binding problem (400, 401, 403, a missing track or stage): reported to the app; polling continues.
     case configurationError(code: String)
     /// A 5xx, a 429, a network failure, an unreadable `meta` or a manifest that failed its checksum: backing off.
     case failed

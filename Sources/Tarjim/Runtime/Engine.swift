@@ -24,7 +24,8 @@ struct EngineEnvironment: Sendable {
     var activated: @Sendable () -> Void = {}
     /// Called once the launch has built its snapshot, before anything that can touch the network.
     var ready: @Sendable () -> Void = {}
-    var uptime: @Sendable () -> TimeInterval = MonotonicClock.seconds
+    /// Pauses while the device sleeps, so a wait measured on it can only last longer than asked, never shorter.
+    let uptime: @Sendable () -> TimeInterval
 }
 
 /// Event streams and the language override, read from synchronous contexts.
