@@ -72,31 +72,49 @@ final class Runtime: Sendable {
         private var proxyInstalled = false
         let readiness = ReadyLatch()
         private var requestedInFlight: Task<TarjimCheckResult, Never>?
-        private var lastRequested: (at: Date, result: TarjimCheckResult)?
+        // Both on uptime: a changed date must neither open the window early nor end a backoff early.
+        private var lastRequested: (at: TimeInterval, result: TarjimCheckResult)?
+        // Kept in memory as well as in the store, whose save may fail.
+        private var backoffUntil: TimeInterval?
+        // nil until the launch or a lifecycle change says; a launch in the background is not active.
+        private var activity: Bool?
 
-        /// The last request-driven answer while it is younger than `window`, else the check in flight, else a new one.
-        func requestedCheck(now: Date, window: TimeInterval,
+        /// The check in flight, else the last answer while younger than `window`, else `.notDue` while a backoff runs,
+        /// else a new check.
+        func requestedCheck(uptime: TimeInterval, window: TimeInterval,
                             run: @escaping @Sendable () async -> TarjimCheckResult) async -> TarjimCheckResult {
-            let task: Task<TarjimCheckResult, Never> = lock.withLock {
-                if let requestedInFlight { return requestedInFlight }
-                // A clock set back must not hold an old answer for longer than the window.
-                if let lastRequested, lastRequested.at <= now, now.timeIntervalSince(lastRequested.at) < window {
-                    let held = lastRequested.result
-                    return Task { held }
+            enum Step { case answer(TarjimCheckResult), wait(Task<TarjimCheckResult, Never>) }
+            let step: Step = lock.withLock {
+                if let requestedInFlight { return .wait(requestedInFlight) }
+                if let lastRequested, uptime >= lastRequested.at, uptime - lastRequested.at < window {
+                    return .answer(lastRequested.result)
                 }
+                if let backoffUntil, uptime < backoffUntil { return .answer(.notDue) }
                 let created = Task { await run() }
                 requestedInFlight = created
-                return created
+                return .wait(created)
             }
-            return await task.value
+            switch step {
+            case let .answer(result): return result
+            case let .wait(task): return await task.value
+            }
         }
 
-        /// A `.notDue` answer made no request, so it opens no window.
-        func finishRequested(_ result: TarjimCheckResult, at date: Date) {
+        /// A `.notDue` answer made no request, so it opens no window. `backoff` is the wait a failure started.
+        func finishRequested(_ result: TarjimCheckResult, at uptime: TimeInterval, backoff: TimeInterval?) {
             lock.withLock {
                 requestedInFlight = nil
-                if result != .notDue { lastRequested = (date, result) }
+                if result != .notDue { lastRequested = (uptime, result) }
+                if let backoff { backoffUntil = uptime + backoff }
             }
+        }
+
+        /// Whether checks may run: the app is in the foreground, or was launched there and has not resigned since.
+        var isAppActive: Bool { lock.withLock { activity == true } }
+
+        /// The launch decides only until a lifecycle change has.
+        func launched(foreground: Bool) {
+            lock.withLock { if activity == nil { activity = foreground } }
         }
 
         /// The timers run exactly while the app is active.
@@ -171,6 +189,7 @@ final class Runtime: Sendable {
         /// Starts each task unless one runs.
         func startTasks(probation: () -> Task<Void, Never>, schedule: () -> Task<Void, Never>) {
             lock.withLock {
+                activity = true
                 if probationTask == nil { probationTask = probation() }
                 if scheduleTask == nil { scheduleTask = schedule() }
             }
@@ -179,7 +198,7 @@ final class Runtime: Sendable {
         /// Cancels both tasks and records when the app resigned.
         func stopTasks(at now: Date) {
             let tasks: [Task<Void, Never>] = lock.withLock {
-                defer { scheduleTask = nil; probationTask = nil; resignedAt = now }
+                defer { scheduleTask = nil; probationTask = nil; resignedAt = now; activity = false }
                 return [scheduleTask, probationTask].compactMap { $0 }
             }
             for task in tasks { task.cancel() }
@@ -263,6 +282,7 @@ final class Runtime: Sendable {
     /// Launches the engine, cleans up, and reports a revert. Once per instance.
     func start(foreground: Bool) async {
         guard parts.markStarted() else { return }
+        parts.launched(foreground: foreground)
         // `ready` is idempotent; this covers a launch that ends without the engine reaching it.
         defer { parts.finishStart(); parts.readiness.open() }
         installMainBundleProxy()
@@ -331,19 +351,21 @@ final class Runtime: Sendable {
         snapshot.selection?.locales.first ?? appLanguage()
     }
 
-    /// The shortest time between two request-driven checks.
+    /// 60 s is how long the server's edge caches `meta`, so a sooner read could not see anything new.
     static let requestWindow: TimeInterval = 60
 
     /// One check on the app's request; see `Tarjim.checkNow()`.
     func checkOnRequest() async -> TarjimCheckResult {
-        // Before `start` has built the engine there is nothing to check.
-        guard let engine = parts.engine else { return .notDue }
-        let parts = self.parts, reporter = self.reporter, now = environment.now
-        return await parts.requestedCheck(now: now(), window: Runtime.requestWindow) {
-            let report = await engine.checkOnRequest()
-            await reporter.cycleFinished(report)
-            let result = Runtime.result(of: report.outcome)
-            parts.finishRequested(result, at: now())
+        // Before `start` has built the engine there is nothing to check, and checks run only while the app is active.
+        guard let engine = parts.engine, parts.isAppActive else { return .notDue }
+        let parts = self.parts, reporter = self.reporter, uptime = environment.uptime
+        return await parts.requestedCheck(uptime: uptime(), window: Runtime.requestWindow) {
+            let shared = await engine.checkOnRequest()
+            if !shared.joined { await reporter.cycleFinished(shared.report) }
+            let result = Runtime.result(of: shared.report.outcome)
+            // A failed outcome is a backoff; its wait is what `nextCheckIn` holds.
+            let backoff = shared.report.outcome == .failed ? shared.report.nextCheckIn : nil
+            parts.finishRequested(result, at: uptime(), backoff: backoff)
             return result
         }
     }
@@ -362,9 +384,9 @@ final class Runtime: Sendable {
     func checkNow() async -> CycleReport {
         // Before `start` has built the engine there is nothing to check; try again in an hour.
         guard let engine = parts.engine else { return CycleReport(outcome: .failed, nextCheckIn: 3600) }
-        let report = await engine.check()
-        await reporter.cycleFinished(report)
-        return report
+        let shared = await engine.checkShared()
+        if !shared.joined { await reporter.cycleFinished(shared.report) }
+        return shared.report
     }
 
     func setLanguage(_ identifier: String?) async {

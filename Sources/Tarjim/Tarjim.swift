@@ -131,16 +131,19 @@ public enum Tarjim {
 
     /// Checks for an update now, outside the server's schedule, and returns what it found.
     ///
-    /// - At most one extra check a minute: a call within a minute of the previous one returns that answer without a
-    ///   request, and calls made together share one check.
-    /// - Never sooner than the server allows after an error: while a wait it asked for (`Retry-After` included) has
-    ///   not passed, the result is `.notDue` and nothing is requested. The same applies before `start`.
-    /// - It counts as the latest scheduled check, so the next one moves out by the server's interval.
+    /// - It runs only while the app is active, like the scheduled checks: in the background, or before `start`, the
+    ///   result is `.notDue` and nothing is requested.
+    /// - At most one check a minute, because the server caches the answer it reads for a minute. A call within the
+    ///   minute returns the previous answer again, `.failed` included, without a request, and calls made together
+    ///   share one check.
+    /// - Never sooner than the server allows after an error: once that minute has passed, while a wait it asked for
+    ///   (`Retry-After` included) has not, the result is `.notDue` and nothing is requested.
+    /// - It counts as the latest check, so the next scheduled one counts from it.
     /// - It downloads but does not show: use `activatePendingUpdate()` to show the update now. The one exception is
     ///   the first download, shown as soon as it is complete when nothing is held yet.
     ///
-    /// Results: `.downloaded` a newer release arrived; `.noChange` nothing newer; `.notDue` no request was made;
-    /// `.failed` the check could not complete.
+    /// Results: `.downloaded` new text was downloaded; `.noChange` nothing new to download; `.notDue` no request was
+    /// made; `.failed` the check could not complete.
     public static func checkNow() async -> TarjimCheckResult {
         guard let runtime = box.current else { return .notDue }
         return await runtime.checkOnRequest()
@@ -160,7 +163,8 @@ public enum Tarjim {
         return Runtime.Environment(
             root: root, transport: URLSessionTransport(), appBundle: .main,
             preferences: { Locale.preferredLanguages }, appLanguage: { Runtime.appLanguage(of: .main) },
-            now: { Date() }, uptime: { TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000 }, random: { Double.random(in: 0..<1) },
+            now: { Date() }, uptime: { TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000 },
+            random: { Double.random(in: 0..<1) },
             sleep: { seconds in
                 guard seconds.isFinite, seconds > 0 else { return }
                 try? await Task.sleep(nanoseconds: UInt64(min(seconds, 86_400) * 1_000_000_000))
@@ -201,11 +205,13 @@ public enum Tarjim {
 
 /// What `Tarjim.checkNow()` found.
 public enum TarjimCheckResult: Equatable, Sendable {
-    /// The server has nothing newer than what the device holds.
+    /// Nothing new to download.
     case noChange
-    /// A newer release was downloaded; it is shown at the next opportunity, or by `activatePendingUpdate()`.
+    /// New text was downloaded; it is shown at the next opportunity, or by `activatePendingUpdate()`. The first
+    /// download is shown at once, only when nothing is held yet.
     case downloaded
-    /// No request was made: before `start`, or the server asked for a wait after an error that has not passed.
+    /// No request was made: the app is not active, `start` has not run (or is not finished), or the server asked for
+    /// a wait after an error that has not passed.
     case notDue
     /// The check could not complete (network, server or key problem, or a release the SDK would not take).
     case failed

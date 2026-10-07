@@ -79,23 +79,37 @@ actor UpdateCycle {
         self.environment = environment
     }
 
-    /// One cycle if `meta` is due. Concurrent calls share one cycle; one arriving during a language change waits for it.
-    func run() async -> CycleReport {
-        while let current = running {
-            if current.kind == .poll { return await current.task.value }
-            _ = await current.task.value
-        }
-        return await start(.poll) { await $0.execute() }
+    /// A cycle's report, and whether the caller joined a cycle another caller started. Only the starter handles and
+    /// reports it: a joiner doing so as well would count one cycle twice.
+    struct Shared: Sendable {
+        let report: CycleReport
+        let joined: Bool
     }
 
-    /// Like `run()`, but reads `meta` even when the cadence says it is not due. A failure backoff still holds: while it
-    /// runs, this returns `.notDue` without a request.
-    func runNow() async -> CycleReport {
+    /// One cycle if `meta` is due. Concurrent calls share one cycle; one arriving during a language change waits for it.
+    func run() async -> CycleReport { await runShared().report }
+
+    func runShared() async -> Shared {
         while let current = running {
-            if current.kind == .poll { return await current.task.value }
+            if current.kind == .poll { return Shared(report: await current.task.value, joined: true) }
             _ = await current.task.value
         }
-        return await start(.poll) { await $0.execute(ignoringCadence: true) }
+        return Shared(report: await start(.poll) { await $0.execute() }, joined: false)
+    }
+
+    /// Like `runShared()`, but reads `meta` even when the cadence says it is not due. A failure backoff still holds:
+    /// while it runs, this reports `.notDue` without a request.
+    func runNowShared() async -> Shared {
+        while let current = running {
+            if current.kind == .poll {
+                let report = await current.task.value
+                // A scheduled cycle that found nothing due read nothing; this caller still gets its own read.
+                if report.outcome == .notDue { continue }
+                return Shared(report: report, joined: true)
+            }
+            _ = await current.task.value
+        }
+        return Shared(report: await start(.poll) { await $0.execute(ignoringCadence: true) }, joined: false)
     }
 
     /// The selected locales changed; fetch what the newest manifest held lists for them.
@@ -189,7 +203,15 @@ extension UpdateCycle {
         let now = environment.now()
         let start = await environment.store.state
         // `backoffStep` stays above 0 until a cycle settles, so it marks a wait that a request must not cut short.
-        let mayRead = isDue(start, now: now) || (ignoringCadence && start.backoffStep <= 0)
+        // `isDue` is true when `lastCheck` lies ahead of the clock, which would end that wait early.
+        let mayRead: Bool
+        if ignoringCadence && start.backoffStep <= 0 {
+            mayRead = true
+        } else if ignoringCadence {
+            mayRead = (scheduled(start).lastCheck ?? .distantPast) <= now && isDue(start, now: now)
+        } else {
+            mayRead = isDue(start, now: now)
+        }
         guard mayRead else {
             return CycleReport(outcome: .notDue, nextCheckIn: remaining(start, now: now))
         }
