@@ -189,7 +189,7 @@ final class Runtime: Sendable {
         let queue = lifecycle
         resolver = Resolver(app: AppResources(bundle: environment.appBundle, language: environment.appLanguage()),
                             defaultBundle: configuration.defaultBundle, snapshot: { snapshots.current })
-        // Weak, so a runtime nobody holds can end; its deinit finishes the stream.
+        // Weak, so a runtime nobody holds can end, started or not; its deinit finishes the stream.
         Task { [weak self] in
             for await _ in queue.wakeups {
                 // Changes that arrived together net out: a resign straight followed by a become leaves the app active.
@@ -240,15 +240,21 @@ final class Runtime: Sendable {
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: environment.appVersion,
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
                                       installIdentifier: identifier)
+        // Reads the holder, not the runtime: a closure the engine keeps must not keep the runtime alive.
+        let snapshots = self.snapshots
+        let appLanguage = environment.appLanguage
         let client = DeliveryClient(endpoint: endpoint, identity: identity, transport: environment.transport,
-                                    language: { [self] in locale.identifier })
+                                    language: { Self.selectedLanguage(snapshots.current, appLanguage: appLanguage) })
         let parts = self.parts
         let engine = Engine(EngineEnvironment(
             store: store, client: client, snapshots: snapshots, preferences: environment.preferences,
             appLanguage: environment.appLanguage, fallbackLanguage: configuration.fallbackLanguage,
             now: environment.now, random: environment.random,
             // An install shown mid-session is proven by the foreground time after it, not before.
-            activated: { [self] in parts.restartProbation(makeProbationTask) },
+            activated: { [weak self] in
+                guard let self else { return }
+                parts.restartProbation(makeProbationTask)
+            },
             ready: { parts.readiness.open() }))
         parts.engine = engine
         // The stream is opened before the launch so no event is missed.
@@ -287,8 +293,12 @@ final class Runtime: Sendable {
     }
 
     var locale: Locale {
-        if let first = snapshots.current.selection?.locales.first { return Locale(identifier: first) }
-        return Locale(identifier: environment.appLanguage())
+        Locale(identifier: Self.selectedLanguage(snapshots.current, appLanguage: environment.appLanguage))
+    }
+
+    /// As the release names it: `Locale` would rewrite some identifiers (`iw` to `he`).
+    private static func selectedLanguage(_ snapshot: Snapshot, appLanguage: () -> String) -> String {
+        snapshot.selection?.locales.first ?? appLanguage()
     }
 
     /// One check now, with its report passed to the reporter.
