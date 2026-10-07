@@ -98,11 +98,11 @@ final class Runtime: Sendable {
             }
         }
 
-        /// A `.notDue` answer made no request, so it opens no window.
+        /// A `.notNow` answer made no request, so it opens no window.
         func finishRequested(_ result: TarjimCheckResult, at uptime: TimeInterval) {
             lock.withLock {
                 requestedInFlight = nil
-                if result != .notDue { lastRequested = (uptime, result) }
+                if result != .notNow { lastRequested = (uptime, result) }
             }
         }
 
@@ -355,7 +355,7 @@ final class Runtime: Sendable {
     /// One check on the app's request; see `Tarjim.checkNow()`.
     func checkOnRequest() async -> TarjimCheckResult {
         // Before `start` has built the engine there is nothing to check, and checks run only while the app is active.
-        guard let engine = parts.engine, parts.isAppActive else { return .notDue }
+        guard let engine = parts.engine, parts.isAppActive else { return .notNow }
         let parts = self.parts, reporter = self.reporter, uptime = environment.uptime
         return await parts.requestedCheck(uptime: uptime(), window: Runtime.requestWindow) {
             let shared = await engine.checkOnRequest()
@@ -371,7 +371,7 @@ final class Runtime: Sendable {
         case .installed: .downloaded
         case .unchanged, .discardedPending, .skipped, .unreleased: .noChange
         case .failed, .configurationError, .rejected: .failed
-        case .notDue: .notDue
+        case .notDue: .notNow
         }
     }
 
