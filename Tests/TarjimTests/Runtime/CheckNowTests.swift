@@ -296,4 +296,126 @@ final class CheckNowTests: XCTestCase {
         XCTAssertEqual(result, .notDue)
         XCTAssertEqual(harness.server.metaRequests.count, requests)
     }
+
+    // MARK: A backoff the schedule started holds requests too
+
+    private func lockStores(_ harness: RuntimeHarness) throws {
+        let stores = try FileManager.default.contentsOfDirectory(at: harness.root.appendingPathComponent("Tarjim/v1"),
+                                                                 includingPropertiesForKeys: nil)
+        for store in stores { try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: store.path) }
+        addTeardownBlock {
+            for store in stores { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: store.path) }
+        }
+    }
+
+    /// Release one shown, then a scheduled check answered 429 with a Retry-After of 600 s.
+    private func scheduledRetryAfter(_ harness: RuntimeHarness, lockingStores: Bool = false) async throws -> Runtime {
+        let runtime = try await installOne(harness)
+        harness.clock.advance(1800)
+        if lockingStores { try lockStores(harness) }
+        harness.server.answerMeta(CycleFixtures.problem(429, code: "too-many-requests", retryAfter: 600))
+        let scheduled = await runtime.checkNow()
+        XCTAssertEqual(scheduled.outcome, .failed)
+        harness.server.publish(try Release.one())
+        return runtime
+    }
+
+    func testAScheduledRetryAfterHoldsRequests() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await scheduledRetryAfter(harness)
+        let requests = harness.server.metaRequests.count
+        harness.clock.advance(61)
+        let during = await runtime.checkOnRequest()
+        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(harness.server.metaRequests.count, requests)
+    }
+
+    func testAScheduledRetryAfterHoldsRequestsWhenItCouldNotBeSaved() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await scheduledRetryAfter(harness, lockingStores: true)
+        let requests = harness.server.metaRequests.count
+        harness.clock.advance(61)
+        let during = await runtime.checkOnRequest()
+        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(harness.server.metaRequests.count, requests)
+    }
+
+    func testAScheduledRetryAfterHoldsRequestsWhenTheDateIsSetBack() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await scheduledRetryAfter(harness)
+        let requests = harness.server.metaRequests.count
+        harness.clock.jump(-5)
+        let during = await runtime.checkOnRequest()
+        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(harness.server.metaRequests.count, requests)
+    }
+
+    func testAScheduledRetryAfterHoldsRequestsWhenTheDateIsSetForward() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await scheduledRetryAfter(harness)
+        let requests = harness.server.metaRequests.count
+        harness.clock.advance(5)
+        harness.clock.jump(700)
+        let during = await runtime.checkOnRequest()
+        XCTAssertEqual(during, .notDue)
+        XCTAssertEqual(harness.server.metaRequests.count, requests)
+    }
+
+    func testAScheduledBackoffHoldsARequestRacingTheNextScheduledCheck() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await installOne(harness)
+        harness.clock.advance(1800)
+        harness.server.answerMeta(CycleFixtures.problem(503, code: "unavailable"))
+        _ = await runtime.checkNow()
+        let requests = harness.server.metaRequests.count
+        harness.clock.advance(10)
+        async let scheduled = runtime.checkNow()
+        async let requested = runtime.checkOnRequest()
+        let (_, result) = await (scheduled, requested)
+        XCTAssertEqual(result, .notDue)
+        XCTAssertEqual(harness.server.metaRequests.count, requests)
+    }
+
+    // MARK: Other answers
+
+    func testAReleaseTheDeviceCannotUseIsFailed() async throws {
+        let harness = try RuntimeHarness(self)
+        let runtime = try await installOne(harness)
+        harness.server.publish(try Release.one().changing(releaseId: 43, fields: ["schemaVersion": 2]))
+        harness.clock.advance(120)
+        let result = await runtime.checkOnRequest()
+        XCTAssertEqual(result, .failed)
+    }
+
+    func testBackInTheForegroundAfterABackgroundLaunchItReads() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.server.publish(try Release.one())
+        let runtime = try harness.make()
+        await runtime.start(foreground: false)
+        await runtime.becameActive()
+        let result = await runtime.checkOnRequest()
+        XCTAssertEqual(result, .downloaded)
+    }
+
+    /// A request that joins the schedule's first download answers once that download is shown, as it says.
+    func testAJoinedFirstDownloadIsShownWhenTheAnswerArrives() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.server.publish(try Release.one())
+        let runtime = try harness.make()
+        await runtime.start(foreground: true)
+        let gate = Gate()
+        harness.server.onObjectRequest = { gate.hold() }
+        let scheduled = Task { await runtime.checkNow() }
+        try await gate.waitUntilHeld()
+        let requested = Task { () -> (TarjimCheckResult, String) in
+            let result = await runtime.checkOnRequest()
+            return (result, runtime.string("app.title", bundle: nil))
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        gate.open()
+        let (result, title) = await requested.value
+        _ = await scheduled.value
+        XCTAssertEqual(result, .downloaded)
+        XCTAssertEqual(title, "Tarjim")
+    }
 }
