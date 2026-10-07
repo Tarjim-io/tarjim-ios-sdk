@@ -113,14 +113,32 @@ if await Tarjim.checkNow() == .downloaded {
 
 ## Choosing the language in the app
 
+**Start with iOS's own per-app language.** Send users to Settings with a "Language" row that opens
+`UIApplication.openSettingsURLString`, rather than building a picker; that is Apple's own recommendation. The SDK follows
+the app's language, so once the user picks one there, everything is right with no Tarjim call: `Tarjim.string`, text
+routed through the main bundle (`NSLocalizedString`, storyboards, SwiftUI `Text("key")`), right-to-left layout, system
+text and number and date formats. Settings offers only the languages built into the app (and shows the row only when it
+has two or more), so a language delivered only by Tarjim cannot be chosen there.
+
+**Only if the language must change without leaving the app**, or must be one the app does not include:
+
 ```swift
 await Tarjim.setLanguage("ar")   // after start; remembered across launches
 await Tarjim.setLanguage(nil)    // follow the app's language again
 ```
 
-Only Tarjim text changes: layout direction, system text and number formats stay with the app's language. A language
-the release does not have is ignored — and kept, so it applies once a release adds it. `Tarjim.locale` is the locale
-text is served in.
+Only Tarjim text changes. The app then has to:
+
+- set the layout direction itself for a right-to-left language (SwiftUI `.environment(\.layoutDirection, .rightToLeft)`,
+  UIKit `semanticContentAttribute`);
+- draw visible text again when the call returns, and again on `.activated` if the language still had to be downloaded;
+- accept that system text and number and date formats stay in the app's language.
+
+A language the release does not have is ignored — and kept, so it applies once a release adds it. `Tarjim.locale` is the
+locale text is served in.
+
+Do not switch languages with `.environment(\.locale, …)`: SwiftUI then reads the app's built-in text for that locale
+and bypasses Tarjim.
 
 ## Example app
 
