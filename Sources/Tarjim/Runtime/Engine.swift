@@ -24,6 +24,7 @@ struct EngineEnvironment: Sendable {
     var activated: @Sendable () -> Void = {}
     /// Called once the launch has built its snapshot, before anything that can touch the network.
     var ready: @Sendable () -> Void = {}
+    var uptime: @Sendable () -> TimeInterval = MonotonicClock.seconds
 }
 
 /// Event streams and the language override, read from synchronous contexts.
@@ -82,7 +83,8 @@ actor Engine {
             selectLocales: { available in
                 LocaleSelector.select(available: available, preferences: preferences(), appLanguage: appLanguage(),
                                       override: box.override, fallbackLanguage: fallback)?.locales ?? []
-            }))
+            },
+            uptime: environment.uptime))
     }
 
     /// Once per process; a second call only waits for the first. A launch the system makes in the background neither
@@ -116,9 +118,8 @@ actor Engine {
         await refreshOverride()
         let state = await environment.store.state
         let known = (state.pending ?? state.active)?.checksum
-        let result = ignoringCadence ? await cycle.runNowShared() : await cycle.runShared()
-        if !result.joined { await handle(result.report, knownChecksum: known) }
-        return result
+        let handling: UpdateCycle.Handling = { [self] report in await handle(report, knownChecksum: known) }
+        return ignoringCadence ? await cycle.runNowShared(handling: handling) : await cycle.runShared(handling: handling)
     }
 
     /// Stores the language the app asked for (nil: follow the app's language again) and serves it if the release has it.
@@ -308,7 +309,8 @@ actor Engine {
         guard case .installed(let install) = report.outcome else { return }
         if install.checksum != knownChecksum { box.send(.downloaded) }
         await exclusive {
-            if servesNothing() { _ = await activate(install) }
+            // A background launch's first foreground count must come before any activation, or it reads as a cut-short launch.
+            if servesNothing(), !launchedInBackground || foregroundLaunchCounted { _ = await activate(install) }
         }
     }
 

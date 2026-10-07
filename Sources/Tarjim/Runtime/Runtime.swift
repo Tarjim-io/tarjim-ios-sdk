@@ -49,7 +49,8 @@ final class Runtime: Sendable {
         let preferences: @Sendable () -> [String]
         let appLanguage: @Sendable () -> String
         let now: @Sendable () -> Date
-        /// Seconds since boot; never goes back when the user changes the date.
+        /// Seconds on a clock that never goes back, whatever the user does to the date, and that counts time spent
+        /// asleep. Only differences mean anything.
         let uptime: @Sendable () -> TimeInterval
         let random: @Sendable () -> Double
         /// Waits between scheduled checks.
@@ -74,13 +75,10 @@ final class Runtime: Sendable {
         private var requestedInFlight: Task<TarjimCheckResult, Never>?
         // Both on uptime: a changed date must neither open the window early nor end a backoff early.
         private var lastRequested: (at: TimeInterval, result: TarjimCheckResult)?
-        // Kept in memory as well as in the store, whose save may fail.
-        private var backoffUntil: TimeInterval?
         // nil until the launch or a lifecycle change says; a launch in the background is not active.
         private var activity: Bool?
 
-        /// The check in flight, else the last answer while younger than `window`, else `.notDue` while a backoff runs,
-        /// else a new check.
+        /// The check in flight, else the last answer while younger than `window`, else a new check.
         func requestedCheck(uptime: TimeInterval, window: TimeInterval,
                             run: @escaping @Sendable () async -> TarjimCheckResult) async -> TarjimCheckResult {
             enum Step { case answer(TarjimCheckResult), wait(Task<TarjimCheckResult, Never>) }
@@ -89,7 +87,6 @@ final class Runtime: Sendable {
                 if let lastRequested, uptime >= lastRequested.at, uptime - lastRequested.at < window {
                     return .answer(lastRequested.result)
                 }
-                if let backoffUntil, uptime < backoffUntil { return .answer(.notDue) }
                 let created = Task { await run() }
                 requestedInFlight = created
                 return .wait(created)
@@ -100,12 +97,11 @@ final class Runtime: Sendable {
             }
         }
 
-        /// A `.notDue` answer made no request, so it opens no window. `backoff` is the wait a failure started.
-        func finishRequested(_ result: TarjimCheckResult, at uptime: TimeInterval, backoff: TimeInterval?) {
+        /// A `.notDue` answer made no request, so it opens no window.
+        func finishRequested(_ result: TarjimCheckResult, at uptime: TimeInterval) {
             lock.withLock {
                 requestedInFlight = nil
                 if result != .notDue { lastRequested = (uptime, result) }
-                if let backoff { backoffUntil = uptime + backoff }
             }
         }
 
@@ -305,7 +301,8 @@ final class Runtime: Sendable {
                 guard let self else { return }
                 parts.restartProbation(makeProbationTask)
             },
-            ready: { parts.readiness.open() }))
+            ready: { parts.readiness.open() },
+            uptime: environment.uptime))
         parts.engine = engine
         // The stream is opened before the launch so no event is missed.
         let events = engine.updates()
@@ -363,9 +360,7 @@ final class Runtime: Sendable {
             let shared = await engine.checkOnRequest()
             if !shared.joined { await reporter.cycleFinished(shared.report) }
             let result = Runtime.result(of: shared.report.outcome)
-            // A failed outcome is a backoff; its wait is what `nextCheckIn` holds.
-            let backoff = shared.report.outcome == .failed ? shared.report.nextCheckIn : nil
-            parts.finishRequested(result, at: uptime(), backoff: backoff)
+            parts.finishRequested(result, at: uptime())
             return result
         }
     }
