@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// The `User-Agent` names the language Tarjim text is served in, read for each request, so access logs count what
-/// users actually see.
+/// The `User-Agent` names the language selected for Tarjim text (what `locale` reports), read for each request; it can
+/// name a language whose files are still downloading.
 final class UserAgentLanguageTests: XCTestCase {
     private func language(of request: URLRequest?) -> String? {
         guard let agent = request?.value(forHTTPHeaderField: "User-Agent") else { return nil }
@@ -39,5 +39,24 @@ final class UserAgentLanguageTests: XCTestCase {
         harness.server.resetRequests()
         await runtime.checkNow()
         XCTAssertEqual(language(of: harness.server.metaRequests.last), "ar")
+    }
+}
+
+/// A runtime nobody holds any more ends, started or not: nothing it hands out keeps it alive.
+final class RuntimeLifetimeTests: XCTestCase {
+    func testAStartedRuntimeIsFreedOnceReleased() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.server.publish(try Release.one())
+        weak var released: Runtime?
+        do {
+            let runtime = try harness.make()
+            await runtime.start(foreground: true)
+            await runtime.checkNow()
+            await runtime.becameActive()
+            await runtime.resignedActive()
+            released = runtime
+        }
+        await EngineFixtures.settle(until: { released == nil })
+        XCTAssertNil(released)
     }
 }
