@@ -9,6 +9,21 @@ struct CycleEnvironment: Sendable {
     let random: @Sendable () -> Double
     /// The manifest's locale keys → the ones to serve, most specific first (chunk 5 wires LocaleSelector).
     let selectLocales: @Sendable ([String]) -> [String]
+    /// Seconds on a clock that never goes back and keeps counting while the device sleeps.
+    var uptime: @Sendable () -> TimeInterval = MonotonicClock.seconds
+}
+
+/// A clock for waits that must neither follow the user's date nor pause while the device sleeps.
+enum MonotonicClock {
+    private static let ticksToSeconds: Double = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return Double(info.numer) / Double(max(info.denom, 1)) / 1_000_000_000
+    }()
+
+    static func seconds() -> TimeInterval {
+        Double(mach_continuous_time()) * ticksToSeconds
+    }
 }
 
 enum RejectionReason: Equatable, Sendable {
@@ -70,8 +85,9 @@ actor UpdateCycle {
 
     private let environment: CycleEnvironment
     private var running: (kind: Kind, task: Task<CycleReport, Never>)?
-    /// The cadence of this process. A save that fails must not turn every call into a `meta` read.
-    fileprivate var remembered: (lastCheck: Date, interval: Int)?
+    /// The cadence of this process. A save that fails must not turn every call into a `meta` read. `backoffUntil` is
+    /// on the uptime clock: a request may not read before it, whatever the disk or the date says.
+    fileprivate var remembered: (lastCheck: Date, interval: Int, backoffUntil: TimeInterval?)?
     /// What the running cycle has seen; cycles never overlap, so one buffer serves them all.
     fileprivate var seen: [CycleSignal] = []
 
@@ -86,20 +102,23 @@ actor UpdateCycle {
         let joined: Bool
     }
 
+    /// What the starter does with its report; it runs inside the cycle, so a joiner is answered only after it.
+    typealias Handling = @Sendable (CycleReport) async -> Void
+
     /// One cycle if `meta` is due. Concurrent calls share one cycle; one arriving during a language change waits for it.
     func run() async -> CycleReport { await runShared().report }
 
-    func runShared() async -> Shared {
+    func runShared(handling: Handling? = nil) async -> Shared {
         while let current = running {
             if current.kind == .poll { return Shared(report: await current.task.value, joined: true) }
             _ = await current.task.value
         }
-        return Shared(report: await start(.poll) { await $0.execute() }, joined: false)
+        return Shared(report: await start(.poll, handling: handling) { await $0.execute() }, joined: false)
     }
 
     /// Like `runShared()`, but reads `meta` even when the cadence says it is not due. A failure backoff still holds:
     /// while it runs, this reports `.notDue` without a request.
-    func runNowShared() async -> Shared {
+    func runNowShared(handling: Handling? = nil) async -> Shared {
         while let current = running {
             if current.kind == .poll {
                 let report = await current.task.value
@@ -109,7 +128,7 @@ actor UpdateCycle {
             }
             _ = await current.task.value
         }
-        return Shared(report: await start(.poll) { await $0.execute(ignoringCadence: true) }, joined: false)
+        return Shared(report: await start(.poll, handling: handling) { await $0.execute(ignoringCadence: true) }, joined: false)
     }
 
     /// The selected locales changed; fetch what the newest manifest held lists for them.
@@ -118,11 +137,13 @@ actor UpdateCycle {
         return await start(.change) { await $0.executeLanguageChange() }
     }
 
-    private func start(_ kind: Kind, _ work: @escaping @Sendable (UpdateCycle) async -> CycleReport) async -> CycleReport {
+    private func start(_ kind: Kind, handling: Handling? = nil,
+                       _ work: @escaping @Sendable (UpdateCycle) async -> CycleReport) async -> CycleReport {
         let task = Task { [self] in
             clearSignals()
             var report = await work(self)
             report.signals = await finalSignals()
+            await handling?(report)
             finished()
             return report
         }
@@ -205,7 +226,10 @@ extension UpdateCycle {
         // `backoffStep` stays above 0 until a cycle settles, so it marks a wait that a request must not cut short.
         // `isDue` is true when `lastCheck` lies ahead of the clock, which would end that wait early.
         let mayRead: Bool
-        if ignoringCadence && start.backoffStep <= 0 {
+        // Held in memory too: a failed save leaves the step at 0, and a changed date makes `isDue` lie.
+        if ignoringCadence, let until = remembered?.backoffUntil, environment.uptime() < until {
+            mayRead = false
+        } else if ignoringCadence && start.backoffStep <= 0 {
             mayRead = true
         } else if ignoringCadence {
             mayRead = (scheduled(start).lastCheck ?? .distantPast) <= now && isDue(start, now: now)
@@ -290,6 +314,7 @@ extension UpdateCycle {
     /// in every case; the backoff step restarts unless the cycle failed.
     private func conclude(_ verdict: Verdict, now: Date, start: StoreState) async -> CycleReport {
         var interval = 0
+        var backedOff = false
         var report = CycleReport(outcome: .failed, nextCheckIn: 0)
         let random = environment.random()
         try? await environment.store.update { state in
@@ -319,11 +344,12 @@ extension UpdateCycle {
                     outcome = .unchanged
                 }
                 interval = Bounds.interval(Int(wait.rounded(.up)))
+                backedOff = true
                 report = CycleReport(outcome: outcome, nextCheckIn: TimeInterval(interval))
             }
             state.checkInterval = interval
         }
-        remembered = (now, interval)
+        remembered = (now, interval, backedOff ? environment.uptime() + TimeInterval(interval) : nil)
         return report
     }
 

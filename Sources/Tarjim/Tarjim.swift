@@ -163,7 +163,7 @@ public enum Tarjim {
         return Runtime.Environment(
             root: root, transport: URLSessionTransport(), appBundle: .main,
             preferences: { Locale.preferredLanguages }, appLanguage: { Runtime.appLanguage(of: .main) },
-            now: { Date() }, uptime: { TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000 },
+            now: { Date() }, uptime: MonotonicClock.seconds,
             random: { Double.random(in: 0..<1) },
             sleep: { seconds in
                 guard seconds.isFinite, seconds > 0 else { return }
