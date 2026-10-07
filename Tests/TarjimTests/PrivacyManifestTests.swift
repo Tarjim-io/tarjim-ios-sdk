@@ -35,7 +35,7 @@ final class PrivacyManifestTests: XCTestCase {
         let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
         var offenders: [String] = []
         var scanned = 0
-        let apis = ["UserDefaults", "systemUptime", "mach_absolute_time", "creationDate", "modificationDate", "contentModificationDate",
+        let apis = ["UserDefaults", "systemUptime", "mach_absolute_time", "mach_continuous_time", "creationDate", "modificationDate", "contentModificationDate",
                     "volumeAvailableCapacity", "systemFreeSize", "systemSize", "activeInputModes", "statfs", "fstat(", "stat(", "getattrlist"]
         for case let url as URL in enumerator where url.pathExtension == "swift" {
             scanned += 1
