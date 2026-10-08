@@ -125,8 +125,10 @@ if [[ ! "$project" =~ ^[0-9]+$ ]]; then
   fail "--project must be a number"
 fi
 
-if [[ ! "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  fail "--app-version must be MAJOR.MINOR.PATCH"
+# The server's grammar: no leading zeros, at most 32 characters.
+version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+if [[ ! "$app_version" =~ $version_re || ${#app_version} -gt 32 ]]; then
+  fail "--app-version must be MAJOR.MINOR.PATCH without leading zeros, at most 32 characters"
 fi
 
 if [[ -e "$out" ]]; then
