@@ -15,7 +15,7 @@ final class PrivacyManifestTests: XCTestCase {
         XCTAssertEqual((manifest["NSPrivacyTrackingDomains"] as? [String]) ?? [], [])
     }
 
-    /// The per-install identifier (on by default, `sendsInstallIdentifier = false` sends none) is the only data collected:
+    /// The per-install identifier (off by default; `sendsInstallIdentifier = true` sends it) is the only data collected:
     /// not linked to the user, not used for tracking, used to count active installs.
     func testTheInstallIdentifierIsTheOnlyCollectedData() throws {
         let collected = try XCTUnwrap(try manifest()["NSPrivacyCollectedDataTypes"] as? [[String: Any]])

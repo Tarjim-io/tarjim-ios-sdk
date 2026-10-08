@@ -44,16 +44,60 @@ final class DeliveryEndpointTests: XCTestCase {
 }
 
 final class ClientIdentityTests: XCTestCase {
-    func testUserAgentNamesSDKAppOSAndLanguage() {
-        let identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 iOS/17.4 lang/ar")
+    /// Lower-case token names; `rel/0` and `poll/0` until a release is shown and a `pollAfter` obeyed.
+    func testUserAgentNamesSDKAppOSLanguageReleaseAndPoll() {
+        var identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
+        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/0 poll/0")
+        identity.releaseId = 42
+        identity.pollAfter = 1800
+        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/42 poll/1800")
     }
 
     func testInstallIdentifierIsSentOnlyWhenSet() {
         var identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
         XCTAssertFalse(identity.userAgent.contains("install/"))
         identity.installIdentifier = "8f2c1a"
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 iOS/17.4 lang/ar install/8f2c1a")
+        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/0 poll/0 install/8f2c1a")
+    }
+
+    /// Every value is percent-encoded, keeping RFC 3986's unreserved characters, so the line is always
+    /// `token/value` pairs separated by single spaces.
+    func testEveryValueIsPercentEncoded() {
+        let identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4 beta", language: "zh Hans/TW",
+                                      installIdentifier: "a b")
+        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4%20beta lang/zh%20Hans%2FTW rel/0 poll/0 install/a%20b")
+        let unreserved = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "zh-Hant_TW.~",
+                                        installIdentifier: nil)
+        XCTAssertTrue(unreserved.userAgent.contains(" lang/zh-Hant_TW.~ "))
+        let plus = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "a+b", installIdentifier: nil)
+        XCTAssertTrue(plus.userAgent.contains(" lang/a%2Bb "), plus.userAgent)
+        let pairs = identity.userAgent.split(separator: " ", omittingEmptySubsequences: false)
+        XCTAssertTrue(pairs.allSatisfy { $0.split(separator: "/").count == 2 }, identity.userAgent)
+    }
+}
+
+/// The app's version as `X-Tarjim-App-Version` and `app/` carry it: always `MAJOR.MINOR.PATCH`.
+final class AppVersionTests: XCTestCase {
+    func testTheBundleVersionIsReducedToItsCore() {
+        let cases: [(String, String)] = [
+            ("2.3.1", "2.3.1"), ("2.1 beta", "2.1.0"), ("1.0-rc1", "1.0.0"), ("1.2.3+build.7", "1.2.3"), ("3", "3.0.0"),
+            ("1.02", "1.2.0"), ("007.1.0", "7.1.0"), ("1.2.3.4", "1.2.3"), ("1..2", "1.0.0"), ("1.", "1.0.0"),
+            ("beta", "0.0.0"), ("", "0.0.0"), (" 1.2", "0.0.0"), ("v1.2", "0.0.0"), ("-1.2", "0.0.0"),
+            ("99999999999999999999.1", "0.0.0"), ("1.99999999999999999999", "0.0.0"), ("1.2.3.99999999999999999999", "1.2.3"),
+        ]
+        for (raw, core) in cases {
+            XCTAssertEqual(AppVersion.core(of: raw), core, raw)
+        }
+    }
+
+    func testTheCoreAlwaysMatchesTheServersGrammar() {
+        let grammar = try! NSRegularExpression(pattern: #"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"#)
+        for raw in ["", "x", "1", "1.2", "1.2.3", "1.2.3.4.5", "10.20.30-alpha", "0001", "1.0.0.0", String(repeating: "9", count: 40),
+                    "12345678901.12345678901.1234567890"] {
+            let core = AppVersion.core(of: raw)
+            XCTAssertNotNil(grammar.firstMatch(in: core, range: NSRange(core.startIndex..., in: core)), "\(raw) → \(core)")
+            XCTAssertLessThanOrEqual(core.count, 32, raw)
+        }
     }
 }
 
