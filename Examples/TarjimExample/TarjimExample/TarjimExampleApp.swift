@@ -14,9 +14,8 @@ struct TarjimExampleApp: App {
         _model = StateObject(wrappedValue: model)
         let environment = ProcessInfo.processInfo.environment
         Tarjim.start(TarjimConfiguration(
-            projectId: Int(environment["TARJIM_EXAMPLE_PROJECT_ID"] ?? "") ?? 0,
+            deliveryURL: URL(string: environment["TARJIM_EXAMPLE_DELIVERY_URL"] ?? "https://tarjim.invalid/t/0/projects/0/delivery/meta")!,
             apiKey: environment["TARJIM_EXAMPLE_API_KEY"] ?? "YOUR_API_KEY",
-            host: URL(string: environment["TARJIM_EXAMPLE_HOST"] ?? "https://tarjim.invalid")!,
             defaultBundle: .namespace("app"),
             fallbackLanguage: "en"))
     }

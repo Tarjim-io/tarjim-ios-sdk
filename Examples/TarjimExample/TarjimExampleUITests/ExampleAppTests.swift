@@ -26,8 +26,7 @@ final class ExampleAppTests: XCTestCase {
     private func launch(host: URL, reset: Bool) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = [
-            "TARJIM_EXAMPLE_HOST": host.absoluteString,
-            "TARJIM_EXAMPLE_PROJECT_ID": "1",
+            "TARJIM_EXAMPLE_DELIVERY_URL": host.appendingPathComponent("t/1/projects/1/delivery/meta").absoluteString,
             "TARJIM_EXAMPLE_API_KEY": apiKey,
         ]
         if reset { app.launchArguments = ["-TarjimExampleReset"] }
