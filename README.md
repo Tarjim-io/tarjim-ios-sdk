@@ -165,8 +165,9 @@ reported. Nothing is sent over the network; without a handler a line goes to the
 
 The SDK ships a privacy manifest. It does not track. Update checks carry a `User-Agent` of `token/value` pairs:
 the SDK version, the app version reduced to `MAJOR.MINOR.PATCH`, the iOS version, the language selected for Tarjim
-text, the release the app is showing (`rel/0` when none) and the interval in force, the polling interval the server asked
-for after the SDK's bounds, never a backoff wait (`poll/0` before the first answer). Every value is percent-encoded.
+text, the release the app is showing (`rel/0` when none) and the polling interval the SDK is following (`poll/`): the
+server's `pollAfter` within the SDK's bounds, or the SDK's default when an answer names none. It is never a backoff
+wait, and it is `poll/0` before the first answer. Every value is percent-encoded.
 When the app's version cannot be read as numbers it is sent as `0.0.0`. `meta` requests also carry
 `X-Tarjim-App-Version`, the same value. A random install identifier is sent only when you set
 `sendsInstallIdentifier = true` (off by default); the SDK creates it per install (new on reinstall and when the key
