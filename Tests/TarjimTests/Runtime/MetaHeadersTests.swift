@@ -76,7 +76,7 @@ final class MetaHeadersTests: XCTestCase {
     }
 
     func testTheInstallIdentifierIsOffUnlessTheAppTurnsItOn() async throws {
-        let configuration = TarjimConfiguration(projectId: 1, apiKey: "k", host: URL(string: "https://example.invalid")!,
+        let configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: "k",
                                                 defaultBundle: .namespace("default"), fallbackLanguage: "en")
         XCTAssertFalse(configuration.sendsInstallIdentifier)
     }
