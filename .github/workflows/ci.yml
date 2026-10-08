@@ -77,6 +77,9 @@ jobs:
           device_type="$(xcrun simctl list devicetypes | sed -nE 's/^${{ matrix.device }} \((com\.apple[^)]*)\)$/\1/p' | sed -n 1p)"
           test -n "$device_type"
           udid="$(xcrun simctl create tarjim-ci "$device_type" "$runtime")"
+          # Booted before the run: a cold boot on a busy runner can outlast the first test's launch timeout.
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
           xcodebuild test -scheme Tarjim -destination "id=$udid"
 
   example:
@@ -95,4 +98,7 @@ jobs:
           device_type="$(xcrun simctl list devicetypes | sed -nE 's/^iPhone 17 \((com\.apple[^)]*)\)$/\1/p' | sed -n 1p)"
           test -n "$device_type"
           udid="$(xcrun simctl create tarjim-example "$device_type" "$runtime")"
+          # Booted before the run: a cold boot on a busy runner can outlast the first test's launch timeout.
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
           xcodebuild test -project Examples/TarjimExample/TarjimExample.xcodeproj -scheme TarjimExample -destination "id=$udid"
