@@ -31,9 +31,8 @@ Call `start` once, early, on the main thread — in `application(_:didFinishLaun
 import Tarjim
 
 Tarjim.start(TarjimConfiguration(
-    projectId: 7,
+    deliveryURL: URL(string: "https://api.example.com/t/7/projects/1/delivery/meta")!,
     apiKey: "<a key bound to your track and stage>",
-    host: URL(string: "https://api.example.com")!,
     defaultBundle: .custom("app"),
     fallbackLanguage: "en"
 ))
@@ -44,7 +43,10 @@ Tarjim.start(TarjimConfiguration(
   `.namespace("checkout")` or `.custom("home")`.
 - `fallbackLanguage` is served, for the whole app, to a user whose language the release does not have — after the
   app's own text in the user's language. A key missing in the user's language never shows another language.
-- The key is sent only in a header, only to `host`. Use a key bound to a track and stage, with read access only.
+- `deliveryURL` is copied from the Tarjim console and requested as it is. It must be `https`; `http` is accepted only
+  for a local server (`localhost`, `127.0.0.1` or `::1`). It needs a path, with no trailing slash, query, fragment or
+  credentials; an invalid one stops a debug build with an assertion and is ignored in a release build.
+- The key is sent only in a header, only to the delivery URL's host. Use a key bound to a track and stage, with read access only.
 
 On the main thread, `start` serves the release already stored on the device before it returns, waiting at most about a
 second for it; the network work happens in the background. Lookups made before the first download is installed
@@ -146,7 +148,7 @@ and bypasses Tarjim.
 label and a plural, updates and activation, and switching the language. Open
 `Examples/TarjimExample/TarjimExample.xcodeproj`. The project's shared scheme is committed, so do not put your key in
 it: choose Product > Scheme > Manage Schemes, duplicate `TarjimExample`, untick "Shared" on the copy (it is then
-kept in `xcuserdata/`, which git ignores), and set `TARJIM_EXAMPLE_HOST`, `TARJIM_EXAMPLE_PROJECT_ID` and
+kept in `xcuserdata/`, which git ignores), and set `TARJIM_EXAMPLE_DELIVERY_URL` and
 `TARJIM_EXAMPLE_API_KEY` in the copy's Run > Arguments > Environment Variables. Never commit a real key. The example
 builds against this checkout, not a release. Its UI tests run the same app against a local stub server.
 
