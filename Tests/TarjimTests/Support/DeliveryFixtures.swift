@@ -4,15 +4,14 @@ import XCTest
 
 /// One endpoint, one identity and the recorded fixtures, shared by the delivery tests.
 enum DeliveryFixtures {
-    static let host = URL(string: "https://api.example.invalid")!
-    static let projectId = 1
+    static let deliveryURL = URL(string: "https://api.example.invalid/t/7/projects/1/delivery/meta")!
     /// Opaque to the client; deliberately not in the server's key format so the leak scan never
     /// mistakes it for a real one.
     static let apiKey = "test-key-not-a-real-key-0123456789"
     static let identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
 
     static func endpoint() throws -> DeliveryEndpoint {
-        try DeliveryEndpoint(host: host, projectId: projectId, apiKey: apiKey)
+        try DeliveryEndpoint(deliveryURL: deliveryURL, apiKey: apiKey)
     }
 
     static func client(_ transport: FakeTransport, identity: ClientIdentity = identity) throws -> DeliveryClient {

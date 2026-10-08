@@ -24,7 +24,7 @@ final class RuntimeHarness {
     }
 
     func configuration(apiKey: String = DeliveryFixtures.apiKey, sendsInstallIdentifier: Bool = true) -> TarjimConfiguration {
-        var configuration = TarjimConfiguration(projectId: DeliveryFixtures.projectId, apiKey: apiKey, host: DeliveryFixtures.host,
+        var configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: apiKey,
                                                 defaultBundle: .namespace("default"), fallbackLanguage: "en")
         let reports = self.reports
         configuration.onReport = { report in reports.value.append(report) }
@@ -144,7 +144,7 @@ final class RuntimeTests: XCTestCase {
         let old = try harness.make()
         await old.start(foreground: true)
         await old.checkNow()
-        let oldStore = harness.root.appendingPathComponent("Tarjim/v1/\(StoreIdentifier.make(host: DeliveryFixtures.host, projectId: DeliveryFixtures.projectId, apiKey: DeliveryFixtures.apiKey))")
+        let oldStore = harness.root.appendingPathComponent("Tarjim/v1/\(StoreIdentifier.make(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: DeliveryFixtures.apiKey))")
         XCTAssertTrue(StoreFixtures.exists(oldStore))
         let renewed = try harness.make(harness.configuration(apiKey: "another-test-key-0123456789"))
         await renewed.start(foreground: true)
@@ -176,7 +176,7 @@ final class RuntimeTests: XCTestCase {
 
 final class PublicAPITests: XCTestCase {
     func testTheConfigurationNeedsOnlyWhatHasNoSafeDefault() {
-        let configuration = TarjimConfiguration(projectId: 7, apiKey: "k", host: URL(string: "https://api.example.invalid")!,
+        let configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: "k",
                                                 defaultBundle: .custom("home"), fallbackLanguage: "en")
         XCTAssertFalse(configuration.sendsInstallIdentifier, "opt-in")
         XCTAssertTrue(configuration.interceptsMainBundle)

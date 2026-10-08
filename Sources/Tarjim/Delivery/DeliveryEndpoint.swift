@@ -1,45 +1,28 @@
 import Foundation
 
-/// Where one project's delivery routes live, and the key that reads them.
+/// The `meta` URL the console shows as the delivery URL, and the key that reads it.
 struct DeliveryEndpoint: Sendable, Equatable {
     enum Error: Swift.Error, Equatable {
-        case invalidHost
         case invalidDeliveryURL
     }
 
-    init(deliveryURL: URL, apiKey: String) throws {
-        throw Error.invalidDeliveryURL
-    }
-
-    /// Scheme and host (and port) only.
-    let host: URL
-    let projectId: Int
     let apiKey: String
-    /// `<host>/projects/<projectId>/delivery/meta`, never with a trailing slash.
+    /// The delivery URL exactly as given. Its path belongs to the server, so it is never parsed or rebuilt.
     let metaURL: URL
 
-    init(host: URL, projectId: Int, apiKey: String) throws {
-        guard let parts = URLComponents(url: host, resolvingAgainstBaseURL: false),
+    init(deliveryURL: URL, apiKey: String) throws {
+        guard let parts = URLComponents(url: deliveryURL, resolvingAgainstBaseURL: false),
               let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let name = parts.host, !name.isEmpty,
               // Plain http would put the key on the wire in the clear.
               scheme == "https" || ["localhost", "127.0.0.1", "::1"].contains(name.lowercased().trimmingCharacters(in: ["[", "]"])),
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
-              parts.path.isEmpty || parts.path == "/"
-        else { throw Error.invalidHost }
+              // A trailing slash would shift where origin-relative references resolve.
+              parts.path != "/", parts.path.hasPrefix("/"), !parts.path.hasSuffix("/")
+        else { throw Error.invalidDeliveryURL }
 
-        var origin = URLComponents()
-        origin.scheme = scheme
-        origin.host = name
-        origin.port = parts.port
-        var meta = origin
-        meta.path = "/projects/\(projectId)/delivery/meta"
-        guard let originURL = origin.url, let metaURL = meta.url else { throw Error.invalidHost }
-
-        self.host = originURL
-        self.projectId = projectId
         self.apiKey = apiKey
-        self.metaURL = metaURL
+        self.metaURL = deliveryURL
     }
 }
 
@@ -72,13 +55,13 @@ struct ClientIdentity: Sendable, Equatable {
 }
 
 extension DeliveryEndpoint: CustomStringConvertible, CustomDebugStringConvertible {
-    var description: String { "DeliveryEndpoint(host: \(host.absoluteString), projectId: \(projectId))" }
+    var description: String { "DeliveryEndpoint(metaURL: \(metaURL.absoluteString))" }
     var debugDescription: String { description }
 }
 
 extension DeliveryEndpoint: CustomReflectable {
     var customMirror: Mirror {
-        Mirror(self, children: ["host": host, "projectId": projectId, "metaURL": metaURL], displayStyle: .struct)
+        Mirror(self, children: ["metaURL": metaURL], displayStyle: .struct)
     }
 }
 

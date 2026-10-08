@@ -24,7 +24,7 @@ final class DeliveryClientObjectTests: XCTestCase {
         let (_, transport) = try await fetch(try DeliveryFixtures.meta("origin"), hash: object.hash, fileType: object.fileType, expectedSize: object.size,
                                              FakeTransport.Answer(status: 200, body: object.bytes))
         let request = try XCTUnwrap(transport.requests.first)
-        XCTAssertEqual(request.url?.absoluteString, "https://api.example.invalid/projects/1/delivery/released/slices/\(object.hash).\(object.fileType)")
+        XCTAssertEqual(request.url?.absoluteString, "https://api.example.invalid/t/7/projects/1/delivery/released/slices/\(object.hash).\(object.fileType)")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Tarjim-Apikey"), DeliveryFixtures.apiKey)
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Tarjim-Api-Version"), "2026-07-29")
         XCTAssertNil(request.value(forHTTPHeaderField: "Accept-Encoding"))
@@ -140,7 +140,7 @@ final class DeliveryClientObjectTests: XCTestCase {
             let host = request.url?.host ?? ""
             let carriesKey = (request.allHTTPHeaderFields ?? [:]).values.contains { $0.contains(DeliveryFixtures.apiKey) }
                 || (request.url?.absoluteString.contains(DeliveryFixtures.apiKey) ?? false)
-            XCTAssertEqual(carriesKey, host == DeliveryFixtures.host.host, "\(request.url?.absoluteString ?? "")")
+            XCTAssertEqual(carriesKey, host == DeliveryFixtures.deliveryURL.host, "\(request.url?.absoluteString ?? "")")
         }
     }
 }
