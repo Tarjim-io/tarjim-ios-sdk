@@ -131,7 +131,9 @@ final class MetaHeadersTests: XCTestCase {
 
     func testARelaunchSendsWhatItLastKnew() async throws {
         let harness = try RuntimeHarness(self)
-        harness.server.publish(try Release.one())
+        let release = try Release.one()
+        harness.server.publish(release)
+        harness.server.answerMeta(release.metaAnswer(pollAfter: 900))
         do {
             let runtime = try harness.make()
             await runtime.start(foreground: true)
@@ -142,7 +144,7 @@ final class MetaHeadersTests: XCTestCase {
         let second = try harness.make()
         await second.start(foreground: true)
         await second.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.first), "1800")
+        XCTAssertEqual(token("poll", of: harness.server.metaRequests.first), "900")
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.first), "42")
     }
 
@@ -156,7 +158,8 @@ final class MetaHeadersTests: XCTestCase {
         harness.server.publish(try EngineFixtures.release(title: "Tarjim 2", releaseId: 43))
         harness.clock.advance(3600)
         await runtime.checkNow()
-        await runtime.setLanguage(nil)
+        // A language the install already holds: the snapshot is rebuilt, nothing is activated.
+        await runtime.setLanguage("en")
         harness.clock.advance(3600)
         await runtime.checkNow()
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.last), "42")

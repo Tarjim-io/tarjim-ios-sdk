@@ -69,6 +69,8 @@ final class ClientIdentityTests: XCTestCase {
         let unreserved = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "zh-Hant_TW.~",
                                         installIdentifier: nil)
         XCTAssertTrue(unreserved.userAgent.contains(" lang/zh-Hant_TW.~ "))
+        let plus = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "a+b", installIdentifier: nil)
+        XCTAssertTrue(plus.userAgent.contains(" lang/a%2Bb "), plus.userAgent)
         let pairs = identity.userAgent.split(separator: " ", omittingEmptySubsequences: false)
         XCTAssertTrue(pairs.allSatisfy { $0.split(separator: "/").count == 2 }, identity.userAgent)
     }
@@ -81,7 +83,7 @@ final class AppVersionTests: XCTestCase {
             ("2.3.1", "2.3.1"), ("2.1 beta", "2.1.0"), ("1.0-rc1", "1.0.0"), ("1.2.3+build.7", "1.2.3"), ("3", "3.0.0"),
             ("1.02", "1.2.0"), ("007.1.0", "7.1.0"), ("1.2.3.4", "1.2.3"), ("1..2", "1.0.0"), ("1.", "1.0.0"),
             ("beta", "0.0.0"), ("", "0.0.0"), (" 1.2", "0.0.0"), ("v1.2", "0.0.0"), ("-1.2", "0.0.0"),
-            ("99999999999999999999.1", "0.0.0"), ("1.99999999999999999999", "0.0.0"),
+            ("99999999999999999999.1", "0.0.0"), ("1.99999999999999999999", "0.0.0"), ("1.2.3.99999999999999999999", "1.2.3"),
         ]
         for (raw, core) in cases {
             XCTAssertEqual(AppVersion.core(of: raw), core, raw)
