@@ -187,6 +187,8 @@ private struct Verdict {
     var held: Signature?
     var rejected: String?
     var pollAfter: Int?
+    /// The interval this answer put the schedule on; a backoff wait never is one.
+    var pollInForce: Int?
 }
 
 /// A manifest read once: the listed files and the slots to hold, computed a single time per cycle.
@@ -241,24 +243,29 @@ extension UpdateCycle {
             let pollAfter = Bounds.poll(meta.pollAfter)
             var verdict = await decide(Signature(meta: meta, raw: raw, etag: etag), state: start, interval: pollAfter)
             verdict.pollAfter = pollAfter
+            verdict.pollInForce = pollAfter
             return await conclude(verdict, now: now, start: start)
         case .notModified:
             seen.append(.metaAnswered)
             let interval = Bounds.poll(start.lastPollAfter ?? 1800)
             guard let held = heldSignature(start) else {
-                return await conclude(Verdict(finish: .settled(.unchanged, interval: interval)), now: now, start: start)
+                return await conclude(Verdict(finish: .settled(.unchanged, interval: interval), pollInForce: interval),
+                                      now: now, start: start)
             }
-            return await conclude(await decide(held, state: start, interval: interval), now: now, start: start)
+            var verdict = await decide(held, state: start, interval: interval)
+            verdict.pollInForce = interval
+            return await conclude(verdict, now: now, start: start)
         case .unreadable, .networkFailure:
             return await conclude(Verdict(finish: .backoff(retryAfter: nil)), now: now, start: start)
         case let .throttled(retryAfter), let .serverError(retryAfter):
             return await conclude(Verdict(finish: .backoff(retryAfter: retryAfter)), now: now, start: start)
         case let .configurationError(code, pollAfter):
             let interval = Bounds.poll(pollAfter ?? start.lastPollAfter ?? 1800)
-            return await conclude(Verdict(finish: .settled(.configurationError(code: code), interval: interval)), now: now, start: start)
+            return await conclude(Verdict(finish: .settled(.configurationError(code: code), interval: interval), pollInForce: interval),
+                                  now: now, start: start)
         case let .unreleased(pollAfter):
             let interval = Bounds.poll(pollAfter ?? 60)
-            return await conclude(Verdict(finish: .settled(.unreleased, interval: interval), pollAfter: pollAfter.map(Bounds.poll)),
+            return await conclude(Verdict(finish: .settled(.unreleased, interval: interval), pollAfter: pollAfter.map(Bounds.poll), pollInForce: interval),
                                   now: now, start: start)
         }
     }
@@ -315,6 +322,7 @@ extension UpdateCycle {
         try? await environment.store.update { state in
             state.lastCheck = now
             if let pollAfter = verdict.pollAfter { state.lastPollAfter = pollAfter }
+            if let inForce = verdict.pollInForce { state.pollInForce = inForce }
             if let held = verdict.held {
                 state.heldMeta = held.raw
                 state.metaETag = held.etag

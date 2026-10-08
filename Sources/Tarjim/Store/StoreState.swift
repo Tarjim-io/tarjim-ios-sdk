@@ -37,6 +37,9 @@ struct StoreState: Codable, Equatable, Sendable {
     var nextInstallNumber: Int = 1
     var lastCheck: Date?
     var lastPollAfter: Int?
+    /// The interval the schedule follows after the latest answer of any kind, sent as `poll/`. Apart from
+    /// `lastPollAfter`, which only a `meta` body sets and which is the fallback when an answer names none.
+    var pollInForce: Int?
     var backoffStep: Int = 0
     var active: InstallRecord?
     var previous: InstallRecord?
@@ -73,6 +76,7 @@ struct StoreState: Codable, Equatable, Sendable {
         nextInstallNumber = try c.decodeIfPresent(Int.self, forKey: .nextInstallNumber) ?? 1
         lastCheck = try c.decodeIfPresent(Date.self, forKey: .lastCheck)
         lastPollAfter = try c.decodeIfPresent(Int.self, forKey: .lastPollAfter)
+        pollInForce = try c.decodeIfPresent(Int.self, forKey: .pollInForce)
         backoffStep = try c.decodeIfPresent(Int.self, forKey: .backoffStep) ?? 0
         active = try c.decodeIfPresent(InstallRecord.self, forKey: .active)
         previous = try c.decodeIfPresent(InstallRecord.self, forKey: .previous)

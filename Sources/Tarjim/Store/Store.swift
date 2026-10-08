@@ -59,7 +59,7 @@ actor Store {
     nonisolated let directory: URL
     private(set) var state: StoreState
     private let pollMirror = PollMirror()
-    /// The `pollAfter` the schedule follows, 0 before any `meta` answered. Updated by every save, so a request
+    /// The interval the schedule follows, 0 before any answer set one. Updated by every save, so a request
     /// never reads an older one than the last that was persisted.
     nonisolated var lastPollAfter: Int { pollMirror.current }
     private var protectedDirectories: Set<String> = []
@@ -81,7 +81,7 @@ actor Store {
         values.isExcludedFromBackup = true
         try tarjimURL.setResourceValues(values)
         state = Store.loadState(from: directory.appendingPathComponent("state.json"), sdkVersion: sdkVersion)
-        pollMirror.current = state.lastPollAfter ?? 0
+        pollMirror.current = Store.mirroredPoll(state)
     }
 
     private static func loadState(from file: URL, sdkVersion: String) -> StoreState {
@@ -94,6 +94,13 @@ actor Store {
             loaded.sdkVersion = sdkVersion
         }
         return sanitised(loaded)
+    }
+
+    /// A state file written before `pollInForce` existed still has `lastPollAfter`. The clamp is the cycle's own
+    /// (60 s to a day): the file may be damaged, and the value goes out in a header.
+    private static func mirroredPoll(_ state: StoreState) -> Int {
+        guard let value = state.pollInForce ?? state.lastPollAfter else { return 0 }
+        return min(max(value, 60), 86_400)
     }
 
     /// state.json is data from disk: its names become path components, so they are checked like server input.
@@ -136,7 +143,7 @@ actor Store {
             throw error
         }
         self.state = state
-        pollMirror.current = state.lastPollAfter ?? 0
+        pollMirror.current = Store.mirroredPoll(state)
     }
 
     func stage(checksum: String, hash: String, fileType: String, verifiedBytes: Data) throws {
