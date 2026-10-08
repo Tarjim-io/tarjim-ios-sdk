@@ -52,11 +52,17 @@ struct ClientIdentity: Sendable, Equatable {
     var pollAfter: Int = 0
 
     var userAgent: String {
-        var agent = "Tarjim-iOS/\(sdkVersion) app/\(appVersion) iOS/\(osVersion) lang/\(language)"
-        if let installIdentifier {
-            agent += " install/\(installIdentifier)"
-        }
-        return agent
+        var tokens = [("Tarjim-iOS", sdkVersion), ("app", appVersion), ("ios", osVersion), ("lang", language),
+                      ("rel", String(releaseId)), ("poll", String(pollAfter))]
+        if let installIdentifier { tokens.append(("install", installIdentifier)) }
+        return tokens.map { "\($0.0)/\(Self.encoded($0.1))" }.joined(separator: " ")
+    }
+
+    // Space and `/` are encoded too, so the line is always single-space-separated `token/value` pairs.
+    private static let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    private static func encoded(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
 }
 
@@ -73,7 +79,22 @@ extension DeliveryEndpoint: CustomReflectable {
 
 /// The app's version in the one form the server accepts.
 enum AppVersion {
+    private static let fallback = "0.0.0"
+
     static func core(of version: String) -> String {
-        version
+        var parts: [Int] = []
+        var rest = Substring(version)
+        while true {
+            let digits = rest.prefix { $0.isASCII && $0.isNumber }
+            guard !digits.isEmpty else { break }
+            guard let number = Int(digits) else { return fallback }
+            parts.append(number)
+            rest = rest.dropFirst(digits.count)
+            guard rest.first == "." else { break }
+            rest = rest.dropFirst()
+        }
+        guard !parts.isEmpty else { return fallback }
+        let core = (parts + [0, 0, 0]).prefix(3).map(String.init).joined(separator: ".")
+        return core.count <= 32 ? core : fallback
     }
 }

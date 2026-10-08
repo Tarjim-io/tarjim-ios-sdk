@@ -346,7 +346,8 @@ actor Engine {
             available: Engine.locales(of: manifest), preferences: environment.preferences(),
             appLanguage: environment.appLanguage(), override: box.override,
             fallbackLanguage: environment.fallbackLanguage)
-        environment.snapshots.replace(Snapshot(installDirectory: store.url(of: active), entries: entries, selection: selection))
+        environment.snapshots.replace(Snapshot(installDirectory: store.url(of: active), entries: entries, selection: selection,
+                                                 releaseId: active.releaseId))
         await store.protect(active)
     }
 
