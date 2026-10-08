@@ -13,8 +13,10 @@ struct DeliveryEndpoint: Sendable, Equatable {
     init(deliveryURL: URL, apiKey: String) throws {
         guard let parts = URLComponents(url: deliveryURL, resolvingAgainstBaseURL: false),
               let scheme = parts.scheme?.lowercased(), scheme == "http" || scheme == "https",
-              let name = parts.percentEncodedHost, !name.isEmpty, name == parts.host,
-              // Plain http would put the key on the wire in the clear. Compared on the raw host, so an encoded or
+              let name = deliveryURL.host, !name.isEmpty, !Self.authority(of: deliveryURL).contains("%"),
+              // `URLComponents` decodes an `xn--` host to Unicode and `URL.host` decodes percent escapes, so the
+              // raw authority is checked for escapes and `URL.host` supplies the ASCII name.
+              // Plain http would put the key on the wire in the clear. Compared on the ASCII host, so an encoded or
               // trailing-dot spelling of a loopback name does not pass.
               scheme == "https" || ["localhost", "127.0.0.1", "::1"].contains(name.lowercased().trimmingCharacters(in: ["[", "]"])),
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
@@ -27,12 +29,18 @@ struct DeliveryEndpoint: Sendable, Equatable {
         self.metaURL = deliveryURL
     }
 
+    private static func authority(of url: URL) -> Substring {
+        let text = url.absoluteString
+        guard let separator = text.range(of: "://") else { return "" }
+        return text[separator.upperBound...].prefix { $0 != "/" }
+    }
+
     /// Parses only to refuse: dot segments make the requested path and the base for origin references disagree,
-    /// and whitespace or control characters mean a bad paste. Both are checked after decoding, so `%2e` and `%20` count.
+    /// and whitespace, control or invisible (format) characters mean a bad paste. Both are checked after decoding, so `%2e` and `%20` count.
     private static func pathIsPlain(_ encodedPath: String) -> Bool {
         for segment in encodedPath.split(separator: "/", omittingEmptySubsequences: false) {
             guard let decoded = String(segment).removingPercentEncoding, decoded != ".", decoded != ".." else { return false }
-            if decoded.unicodeScalars.contains(where: { $0.properties.isWhitespace || $0.properties.generalCategory == .control }) {
+            if decoded.unicodeScalars.contains(where: { $0.properties.isWhitespace || [.control, .format].contains($0.properties.generalCategory) }) {
                 return false
             }
         }
