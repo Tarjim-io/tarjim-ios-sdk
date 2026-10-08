@@ -170,7 +170,7 @@ fetch() {
   cfg="$(mktemp "$work/curl.XXXXXX")"
   printf 'url = "%s"\n' "$url" >"$cfg"
   # -q first: a ~/.curlrc must not add options. No redirects are followed, so the key stays on one host.
-  local args=(-q -sS --compressed --max-time 60 -D "$dump" -o "$body" -w '%{http_code}' -K "$cfg")
+  local args=(-q -sS --globoff --compressed --max-time 60 -D "$dump" -o "$body" -w '%{http_code}' -K "$cfg")
   if [[ -n "$hdr" ]]; then
     args+=(-H "@$hdr")
   fi
