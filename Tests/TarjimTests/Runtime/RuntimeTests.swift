@@ -15,6 +15,8 @@ final class RuntimeHarness {
     /// Ends every wait still blocked (a timer that was never cancelled would then run on).
     let releaseBlockedSleeps = TestValue<Bool>(false)
     let appLanguage = TestValue<String>("en")
+    /// The bundle's version string as the app reports it, before the SDK reduces it.
+    var rawAppVersion = "2.3.1"
 
     init(_ test: XCTestCase) throws {
         root = try StoreFixtures.root(for: test)
@@ -32,7 +34,7 @@ final class RuntimeHarness {
 
     func make(_ configuration: TarjimConfiguration? = nil, transport: (any Transport)? = nil) throws -> Runtime {
         let clock = self.clock, sleeps = self.sleeps, instantSleeps = self.instantSleeps
-        let release = self.releaseBlockedSleeps, appLanguage = self.appLanguage
+        let release = self.releaseBlockedSleeps, appLanguage = self.appLanguage, rawAppVersion = self.rawAppVersion
         let environment = Runtime.Environment(root: root, transport: transport ?? server, appBundle: appBundle,
                                               preferences: { ["en-US"] }, appLanguage: { appLanguage.value }, now: { clock.now }, uptime: { clock.uptime },
                                               random: { 0 }, sleep: { seconds in
@@ -43,7 +45,7 @@ final class RuntimeHarness {
                                                       }
                                                   }
                                               },
-                                              sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4")
+                                              sdkVersion: "0.1.0", appVersion: rawAppVersion, osVersion: "17.4")
         return try Runtime(configuration: configuration ?? self.configuration(), environment: environment)
     }
 }
