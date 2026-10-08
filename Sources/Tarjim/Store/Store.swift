@@ -10,6 +10,10 @@ enum StoreError: Error, Equatable {
 }
 
 enum StoreIdentifier {
+    static func make(deliveryURL: URL, apiKey: String) -> String {
+        ""
+    }
+
     static func make(host: URL, projectId: Int, apiKey: String) -> String {
         let digest = SHA256.hash(data: Data("\(host.absoluteString)\n\(projectId)\n\(apiKey)".utf8))
         return String(hex(digest).prefix(32))

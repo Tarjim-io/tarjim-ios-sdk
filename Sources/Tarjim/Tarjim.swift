@@ -238,6 +238,14 @@ public struct TarjimConfiguration: Sendable {
     /// Routes `NSLocalizedString`, storyboards and SwiftUI `Text` in the main bundle through Tarjim.
     public var interceptsMainBundle: Bool = true
 
+    /// The delivery URL from the Tarjim console.
+    public var deliveryURL: URL { host }
+
+    public init(deliveryURL: URL, apiKey: String, defaultBundle: TarjimBundle, fallbackLanguage: String) {
+        self.init(projectId: 0, apiKey: apiKey, host: URL(string: "https://example.invalid")!, defaultBundle: defaultBundle,
+                  fallbackLanguage: fallbackLanguage)
+    }
+
     public init(projectId: Int, apiKey: String, host: URL, defaultBundle: TarjimBundle, fallbackLanguage: String) {
         self.projectId = projectId
         self.apiKey = apiKey

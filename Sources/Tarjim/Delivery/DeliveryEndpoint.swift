@@ -4,6 +4,11 @@ import Foundation
 struct DeliveryEndpoint: Sendable, Equatable {
     enum Error: Swift.Error, Equatable {
         case invalidHost
+        case invalidDeliveryURL
+    }
+
+    init(deliveryURL: URL, apiKey: String) throws {
+        throw Error.invalidDeliveryURL
     }
 
     /// Scheme and host (and port) only.
