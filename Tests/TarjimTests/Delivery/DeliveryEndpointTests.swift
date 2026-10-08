@@ -44,6 +44,52 @@ final class DeliveryEndpointTests: XCTestCase {
     }
 }
 
+/// The edges a pasted or hand-typed delivery URL can have.
+final class DeliveryURLEdgeTests: XCTestCase {
+    private func refused(_ string: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let url = URL(string: string) else { return }
+        XCTAssertThrowsError(try DeliveryEndpoint(deliveryURL: url, apiKey: "k"), string, file: file, line: line) {
+            XCTAssertEqual($0 as? DeliveryEndpoint.Error, .invalidDeliveryURL, string, file: file, line: line)
+        }
+    }
+
+    /// Dot segments make the request path and the base for origin references disagree.
+    func testDotSegmentsAreRefused() {
+        for path in ["/t/7/projects/1/delivery/meta/.", "/t/7/projects/1/delivery/meta/..", "/t/7/../projects/1/delivery/meta",
+                     "/t/7/./projects/1/delivery/meta", "/t/7/%2e%2e/projects/1/delivery/meta", "/t/7/projects/1/delivery/meta/%2E"] {
+            refused("https://api.example.invalid\(path)")
+        }
+    }
+
+    /// Whitespace or control characters, encoded or not, mean a bad paste, not a URL the server serves.
+    func testWhitespaceIsRefused() {
+        for bad in ["https://api.example.invalid/t/7/projects/1/delivery/meta%20", "https://api.example.invalid/t/7/projects/1/delivery/meta%0A",
+                    "https://api.example.invalid/t/7/projects%091/delivery/meta"] {
+            refused(bad)
+        }
+    }
+
+    /// Plain http is for exactly these loopback names; anything that merely looks local is not.
+    func testOnlyLoopbackItselfMayUseHTTP() {
+        for bad in ["http://0.0.0.0/x/meta", "http://localhost.example.invalid/x/meta", "http://mylocalhost/x/meta",
+                    "http://localhost./x/meta", "http://127.0.0.2/x/meta", "http://%6c%6fcalhost/x/meta", "http://[::ffff:127.0.0.1]/x/meta"] {
+            refused(bad)
+        }
+    }
+}
+
+/// The runtime reads `meta` from the URL it was given, with nothing added.
+final class DeliveryURLWiringTests: XCTestCase {
+    func testTheRuntimeRequestsTheConfiguredURL() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.server.publish(try Release.one())
+        let runtime = try harness.make()
+        await runtime.start(foreground: true)
+        await runtime.checkNow()
+        XCTAssertEqual(harness.server.metaRequests.first?.url, DeliveryFixtures.deliveryURL)
+    }
+}
+
 final class TarjimConfigurationTests: XCTestCase {
     func testTheConfigurationTakesOneDeliveryURL() {
         let url = URL(string: "https://api.example.invalid/t/7/projects/1/delivery/meta")!
