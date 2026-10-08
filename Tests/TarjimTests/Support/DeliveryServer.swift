@@ -149,9 +149,10 @@ struct Release {
     }
 
     /// This release's 200 `meta`, optionally with a renewed signature.
-    func metaAnswer(signedQuery: String? = nil) -> FakeTransport.Answer {
+    func metaAnswer(signedQuery: String? = nil, pollAfter: Int? = nil) -> FakeTransport.Answer {
         var body = metaBody
         if let signedQuery { body["signedQuery"] = signedQuery }
+        if let pollAfter { body["pollAfter"] = pollAfter }
         return .json(200, body, headers: ["ETag": "\"m\(releaseId)-\(checksum.prefix(8))\""])
     }
 

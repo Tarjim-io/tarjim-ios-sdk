@@ -46,6 +46,10 @@ struct ClientIdentity: Sendable, Equatable {
     var language: String
     /// A random per-install identifier, sent only when set.
     var installIdentifier: String?
+    /// The release of the install lookups read; 0 before any is shown.
+    var releaseId: Int = 0
+    /// The `pollAfter` the schedule follows; 0 before any `meta` answered.
+    var pollAfter: Int = 0
 
     var userAgent: String {
         var agent = "Tarjim-iOS/\(sdkVersion) app/\(appVersion) iOS/\(osVersion) lang/\(language)"
@@ -64,5 +68,12 @@ extension DeliveryEndpoint: CustomStringConvertible, CustomDebugStringConvertibl
 extension DeliveryEndpoint: CustomReflectable {
     var customMirror: Mirror {
         Mirror(self, children: ["host": host, "projectId": projectId, "metaURL": metaURL], displayStyle: .struct)
+    }
+}
+
+/// The app's version in the one form the server accepts.
+enum AppVersion {
+    static func core(of version: String) -> String {
+        version
     }
 }
