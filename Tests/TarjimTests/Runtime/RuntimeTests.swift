@@ -23,8 +23,9 @@ final class RuntimeHarness {
         appBundle = try LookupFixtures.appBundle(for: test)
     }
 
-    func configuration(apiKey: String = DeliveryFixtures.apiKey, sendsInstallIdentifier: Bool = true) -> TarjimConfiguration {
-        var configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: apiKey,
+    func configuration(apiKey: String = DeliveryFixtures.apiKey, sendsInstallIdentifier: Bool = true,
+                       deliveryURL: URL = DeliveryFixtures.deliveryURL) -> TarjimConfiguration {
+        var configuration = TarjimConfiguration(deliveryURL: deliveryURL, apiKey: apiKey,
                                                 defaultBundle: .namespace("default"), fallbackLanguage: "en")
         let reports = self.reports
         configuration.onReport = { report in reports.value.append(report) }

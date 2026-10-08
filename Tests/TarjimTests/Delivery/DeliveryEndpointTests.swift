@@ -47,7 +47,7 @@ final class DeliveryEndpointTests: XCTestCase {
 /// The edges a pasted or hand-typed delivery URL can have.
 final class DeliveryURLEdgeTests: XCTestCase {
     private func refused(_ string: String, file: StaticString = #filePath, line: UInt = #line) {
-        guard let url = URL(string: string) else { return }
+        guard let url = URL(string: string) else { return XCTFail("\(string) does not parse", file: file, line: line) }
         XCTAssertThrowsError(try DeliveryEndpoint(deliveryURL: url, apiKey: "k"), string, file: file, line: line) {
             XCTAssertEqual($0 as? DeliveryEndpoint.Error, .invalidDeliveryURL, string, file: file, line: line)
         }
@@ -69,6 +69,19 @@ final class DeliveryURLEdgeTests: XCTestCase {
         }
     }
 
+    func testControlAndInvisibleCharactersAreRefused() {
+        for bad in ["https://api.example.invalid/t/7/projects/1/delivery/meta%00", "https://api.example.invalid/t/7/projects/1/delivery/meta%7F",
+                    "https://api.example.invalid/t/7/projects/1/delivery/meta%E2%80%8B"] {
+            refused(bad)
+        }
+    }
+
+    /// An internationalised host in the ASCII form a console shows is an ordinary host.
+    func testAPunycodeHostIsAccepted() throws {
+        let url = URL(string: "https://xn--bcher-kva.example.invalid/t/7/projects/1/delivery/meta")!
+        XCTAssertEqual(try DeliveryEndpoint(deliveryURL: url, apiKey: "k").metaURL, url)
+    }
+
     /// Plain http is for exactly these loopback names; anything that merely looks local is not.
     func testOnlyLoopbackItselfMayUseHTTP() {
         for bad in ["http://0.0.0.0/x/meta", "http://localhost.example.invalid/x/meta", "http://mylocalhost/x/meta",
@@ -83,10 +96,11 @@ final class DeliveryURLWiringTests: XCTestCase {
     func testTheRuntimeRequestsTheConfiguredURL() async throws {
         let harness = try RuntimeHarness(self)
         harness.server.publish(try Release.one())
-        let runtime = try harness.make()
+        let configured = URL(string: "https://cdn.example.invalid/t/42/projects/9/delivery/meta")!
+        let runtime = try harness.make(harness.configuration(deliveryURL: configured))
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        XCTAssertEqual(harness.server.metaRequests.first?.url, DeliveryFixtures.deliveryURL)
+        XCTAssertEqual(harness.server.metaRequests.first?.url, configured)
     }
 }
 
