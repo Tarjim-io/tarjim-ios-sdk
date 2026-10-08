@@ -12,7 +12,8 @@
 #/
 #/ SYNOPSIS:
 #/   --delivery-url: the delivery URL from the console, requested as given for meta: https://<host>[:port]/<path>,
-#/     or http://localhost|127.0.0.1[:port]/<path>; no trailing slash, query or fragment
+#/     or http://localhost|127.0.0.1|[::1][:port]/<path>; no dot segments, whitespace,
+#/     trailing slash, query or fragment
 #/   --out: recording directory to create; must not exist
 #/   --api-version: value for X-Tarjim-Api-Version (default: 2026-07-29)
 #/   --app-version: value for X-Tarjim-App-Version on meta requests, MAJOR.MINOR.PATCH (default: 0.0.0)
@@ -106,9 +107,13 @@ fi
 
 # No userinfo, query, fragment or trailing slash: the key must go to the host the operator typed.
 https_re='^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~-]+)+$'
-local_re='^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/[A-Za-z0-9._~-]+)+$'
+local_re='^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/[A-Za-z0-9._~-]+)+$'
 if [[ ! "$delivery_url" =~ $https_re && ! "$delivery_url" =~ $local_re ]]; then
-  fail "--delivery-url must be https://<host>[:port]/<path> (http only for localhost and 127.0.0.1), without a trailing slash"
+  fail "--delivery-url must be https://<host>[:port]/<path> (http only for localhost, 127.0.0.1 and [::1]), without a trailing slash"
+fi
+# The character class allows dots, so "." and ".." segments are refused separately, as the SDK does.
+if [[ "$delivery_url" =~ /\.\.?(/|$) ]]; then
+  fail "--delivery-url must not contain \".\" or \"..\" path segments"
 fi
 
 # The server's grammar: no leading zeros, at most 32 characters.
@@ -154,7 +159,8 @@ stage="$work/stage"
 mkdir -p "$stage/objects" "$stage/errors"
 recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-url_re='^[A-Za-z0-9._~:/?&=%+,-]+$'
+# Brackets: an IPv6 loopback host.
+url_re='^[][A-Za-z0-9._~:/?&=%+,-]+$'
 
 # fetch <url> <body-file> <headers-dump-file> [header-file]  -> prints the HTTP status
 fetch() {
