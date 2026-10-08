@@ -84,7 +84,8 @@ enum AppVersion {
     static func core(of version: String) -> String {
         var parts: [Int] = []
         var rest = Substring(version)
-        while true {
+        // Parts past the third are dropped unparsed: an overflowing fourth must not force the fallback.
+        while parts.count < 3 {
             let digits = rest.prefix { $0.isASCII && $0.isNumber }
             guard !digits.isEmpty else { break }
             guard let number = Int(digits) else { return fallback }

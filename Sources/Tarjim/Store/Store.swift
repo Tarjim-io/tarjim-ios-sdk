@@ -100,7 +100,7 @@ actor Store {
     /// (60 s to a day): the file may be damaged, and the value goes out in a header.
     private static func mirroredPoll(_ state: StoreState) -> Int {
         guard let value = state.pollInForce ?? state.lastPollAfter else { return 0 }
-        return min(max(value, 60), 86_400)
+        return Bounds.poll(value)
     }
 
     /// state.json is data from disk: its names become path components, so they are checked like server input.

@@ -200,7 +200,7 @@ private struct Layout {
 }
 
 /// Server numbers are clamped before any arithmetic on them.
-private enum Bounds {
+enum Bounds {
     static let day = 86_400
 
     static func poll(_ value: Int) -> Int { min(max(value, 60), day) }

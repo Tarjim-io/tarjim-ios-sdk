@@ -37,8 +37,8 @@ struct StoreState: Codable, Equatable, Sendable {
     var nextInstallNumber: Int = 1
     var lastCheck: Date?
     var lastPollAfter: Int?
-    /// The interval the schedule follows after the latest answer of any kind, sent as `poll/`. Apart from
-    /// `lastPollAfter`, which only a `meta` body sets and which is the fallback when an answer names none.
+    /// The interval the schedule follows after the latest answer of any kind, sent as `poll/`. Separate from
+    /// `lastPollAfter`, which only a `meta` body sets; that stays the fallback when an answer names none.
     var pollInForce: Int?
     var backoffStep: Int = 0
     var active: InstallRecord?
