@@ -176,7 +176,7 @@ final class PublicAPITests: XCTestCase {
     func testTheConfigurationNeedsOnlyWhatHasNoSafeDefault() {
         let configuration = TarjimConfiguration(projectId: 7, apiKey: "k", host: URL(string: "https://api.example.invalid")!,
                                                 defaultBundle: .custom("home"), fallbackLanguage: "en")
-        XCTAssertTrue(configuration.sendsInstallIdentifier)
+        XCTAssertFalse(configuration.sendsInstallIdentifier, "opt-in")
         XCTAssertTrue(configuration.interceptsMainBundle)
         XCTAssertNil(configuration.onReport)
     }
