@@ -43,14 +43,18 @@ Tarjim.start(TarjimConfiguration(
   `.namespace("checkout")` or `.custom("home")`.
 - `fallbackLanguage` is served, for the whole app, to a user whose language the release does not have — after the
   app's own text in the user's language. A key missing in the user's language never shows another language.
-- `deliveryURL` is copied from the Tarjim console and requested as it is. It must be `https`; `http` is accepted only
-  for a local server (`localhost`, `127.0.0.1` or `::1`). It needs a path, with no trailing slash, query, fragment or
-  credentials; an invalid one stops a debug build with an assertion and is ignored in a release build.
+- `deliveryURL` is copied from the Tarjim console and requested as it is, so paste it exactly as the console shows it.
+  It must be `https`; `http` is accepted only
+  for a local server (exactly `localhost`, `127.0.0.1` or `::1`). It needs a path, with no trailing slash, query,
+  fragment, credentials, whitespace or `.` and `..` segments; an invalid one stops a debug build with an assertion and is ignored in a release build.
 - The key is sent only in a header, only to the delivery URL's host. Use a key bound to a track and stage, with read access only.
 
 On the main thread, `start` serves the release already stored on the device before it returns, waiting at most about a
 second for it; the network work happens in the background. Lookups made before the first download is installed
 read the app's own text. Called off the main thread, `start` returns at once and everything happens in the background.
+
+A store written by a build from before the delivery URL was a single setting is not reused. The first launch after
+updating downloads the release again, and the app shows its own text until that download is installed.
 
 ## Looking up text
 
