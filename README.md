@@ -165,7 +165,7 @@ configuration.onReport = { report in log(report.message) }   // called once per 
 
 A report is sent once per condition until the condition is seen resolved: a release in a format this SDK version does
 not know, a release with no iOS strings, a file failing its hash, a file unavailable for three checks in a row, a
-rejected key, or a reverted update. Normal states — no change, offline, throttled, nothing released yet — are never
+rejected key, an app version the server refuses or that is missing, or a reverted update. Normal states — no change, offline, throttled, nothing released yet — are never
 reported. Nothing is sent over the network; without a handler a line goes to the unified log at debug level.
 
 ## Privacy
