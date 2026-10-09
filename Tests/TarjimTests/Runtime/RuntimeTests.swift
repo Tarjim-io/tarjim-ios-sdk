@@ -122,9 +122,7 @@ final class RuntimeTests: XCTestCase {
             harness.clock.advance(3600)
             await runtime.checkNow()
         }
-        let agents = harness.server.metaRequests.compactMap { $0.value(forHTTPHeaderField: "User-Agent") }
-        XCTAssertEqual(agents.count, 2)
-        let identifiers = agents.compactMap { $0.components(separatedBy: " install/").dropFirst().first }
+        let identifiers = harness.server.metaRequests.compactMap { MetaRequest.query($0)["installId"] }
         XCTAssertEqual(identifiers.count, 2)
         XCTAssertEqual(Set(identifiers).count, 1, "stable across launches")
         XCTAssertNotNil(UUID(uuidString: identifiers[0]))
@@ -134,8 +132,8 @@ final class RuntimeTests: XCTestCase {
         let runtime = try off.make(off.configuration(sendsInstallIdentifier: false))
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        let agent = try XCTUnwrap(off.server.metaRequests.first?.value(forHTTPHeaderField: "User-Agent"))
-        XCTAssertFalse(agent.contains("install/"))
+        let first = try XCTUnwrap(off.server.metaRequests.first)
+        XCTAssertNil(MetaRequest.query(first)["installId"])
     }
 
     /// An app version built with another key starts empty, and the old key's files are removed.
@@ -179,7 +177,7 @@ final class PublicAPITests: XCTestCase {
     func testTheConfigurationNeedsOnlyWhatHasNoSafeDefault() {
         let configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: "k",
                                                 defaultBundle: .custom("home"), fallbackLanguage: "en")
-        XCTAssertFalse(configuration.sendsInstallIdentifier, "opt-in")
+        XCTAssertTrue(configuration.sendsInstallIdentifier, "on by default; an app can turn it off")
         XCTAssertTrue(configuration.interceptsMainBundle)
         XCTAssertNil(configuration.onReport)
     }

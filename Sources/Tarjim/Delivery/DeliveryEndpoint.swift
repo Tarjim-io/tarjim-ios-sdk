@@ -60,6 +60,11 @@ struct ClientIdentity: Sendable, Equatable {
     var releaseId: Int = 0
     /// The `pollAfter` the schedule follows; 0 before any `meta` answered.
     var pollAfter: Int = 0
+    var appBuild: String? = nil
+
+    var metaQuery: String {
+        ""
+    }
 
     var userAgent: String {
         var tokens = [("Tarjim-iOS", sdkVersion), ("app", appVersion), ("ios", osVersion), ("lang", language),

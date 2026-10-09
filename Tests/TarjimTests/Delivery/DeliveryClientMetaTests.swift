@@ -13,11 +13,14 @@ final class DeliveryClientMetaTests: XCTestCase {
 
     // MARK: the request
 
-    func testRequestIsGetOnTheMetaURLWithKeyVersionAndUserAgentHeadersAndNoQuery() async throws {
+    /// The delivery URL as given, with the app's identity as its query; the key goes in a header, never in the query.
+    func testRequestIsGetOnTheMetaURLWithTheIdentityQueryAndKeyAndVersionHeaders() async throws {
         let (_, request) = try await fetch(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
         XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertEqual(request.url, try DeliveryFixtures.endpoint().metaURL)
-        XCTAssertNil(request.url?.query, "the key never travels in a query string")
+        XCTAssertEqual(MetaRequest.withoutQuery(request.url), try DeliveryFixtures.endpoint().metaURL)
+        XCTAssertEqual(request.url?.query, DeliveryFixtures.identity.metaQuery)
+        XCTAssertFalse(request.url?.absoluteString.contains(DeliveryFixtures.apiKey) ?? true, "the key never travels in the query")
+        XCTAssertNil(request.value(forHTTPHeaderField: "X-Tarjim-App-Version"))
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Tarjim-Apikey"), DeliveryFixtures.apiKey)
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Tarjim-Api-Version"), "2026-07-29")
         XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), DeliveryFixtures.identity.userAgent)
@@ -178,5 +181,13 @@ final class DeliveryClientMetaTests: XCTestCase {
         transport.enqueueFailure()
         let outcome = try await DeliveryFixtures.client(transport).fetchMeta(ifNoneMatch: nil)
         XCTAssertEqual(outcome, .networkFailure)
+    }
+
+    /// A `meta` without a well-formed `appVersion` is the app's configuration problem, like a bad key.
+    func testAMissingAppVersionAnswerIsAConfigurationError() async throws {
+        let answer = FakeTransport.Answer.json(400, ["status": 400, "code": "delivery.app_version_required", "title": "Bad Request"],
+                                               headers: ["Content-Type": "application/problem+json"])
+        let (outcome, _) = try await fetch(answer)
+        XCTAssertEqual(outcome, .configurationError(code: "delivery.app_version_required", pollAfter: nil))
     }
 }

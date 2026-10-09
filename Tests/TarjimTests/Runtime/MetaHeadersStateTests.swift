@@ -4,9 +4,11 @@ import XCTest
 
 /// `poll/` and `rel/` as a relaunch reads them back from the stored state, and across answers of every kind.
 final class MetaHeadersStateTests: XCTestCase {
+    /// The old token names, mapped to the query parameters that now carry them.
     private func token(_ name: String, of request: URLRequest?) -> String? {
-        request?.value(forHTTPHeaderField: "User-Agent")?.split(separator: " ")
-            .first { $0.hasPrefix("\(name)/") }.map { String($0.dropFirst(name.count + 1)) }
+        let parameter = ["app": "appVersion", "rel": "release", "poll": "pollSeconds", "lang": "language",
+                         "install": "installId", "ios": "osVersion"][name] ?? name
+        return MetaRequest.query(request)[parameter]
     }
 
     private func editState(_ harness: RuntimeHarness, _ change: (inout [String: Any]) -> Void) throws {

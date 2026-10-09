@@ -2,23 +2,27 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// What an update check says about the app: the app-version header on `meta`, and the release and interval in force.
+/// What an update check says about the app, in the `meta` query: its version, and the release and interval in force.
 final class MetaHeadersTests: XCTestCase {
+    /// The old token names, mapped to the query parameters that now carry them.
     private func token(_ name: String, of request: URLRequest?) -> String? {
-        request?.value(forHTTPHeaderField: "User-Agent")?.split(separator: " ")
-            .first { $0.hasPrefix("\(name)/") }.map { String($0.dropFirst(name.count + 1)) }
+        let parameter = ["app": "appVersion", "rel": "release", "poll": "pollSeconds", "lang": "language",
+                         "install": "installId", "ios": "osVersion"][name] ?? name
+        return MetaRequest.query(request)[parameter]
     }
 
-    func testMetaCarriesTheAppVersionCore() async throws {
+    func testMetaCarriesTheAppVersionCoreInItsQueryOnly() async throws {
         let harness = try RuntimeHarness(self)
         harness.server.publish(try Release.one())
         let runtime = try harness.make()
         await runtime.start(foreground: true)
         await runtime.checkNow()
         let meta = try XCTUnwrap(harness.server.metaRequests.first)
-        XCTAssertEqual(meta.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "2.3.1")
         XCTAssertEqual(token("app", of: meta), "2.3.1")
+        XCTAssertNil(meta.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "the version travels in the query, not a header")
+        XCTAssertEqual(meta.value(forHTTPHeaderField: "User-Agent"), "Tarjim-iOS/0.1.0")
         for other in harness.server.requests where !other.url!.path.hasSuffix("/delivery/meta") {
+            XCTAssertNil(MetaRequest.query(other)["appVersion"], "\(other.url!)")
             XCTAssertNil(other.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "\(other.url!)")
         }
     }
@@ -75,10 +79,10 @@ final class MetaHeadersTests: XCTestCase {
         XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "60", "the obeyed interval, not the backoff")
     }
 
-    func testTheInstallIdentifierIsOffUnlessTheAppTurnsItOn() async throws {
+    func testTheInstallIdentifierIsOnUnlessTheAppTurnsItOff() async throws {
         let configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: "k",
                                                 defaultBundle: .namespace("default"), fallbackLanguage: "en")
-        XCTAssertFalse(configuration.sendsInstallIdentifier)
+        XCTAssertTrue(configuration.sendsInstallIdentifier)
     }
 
     // MARK: Every path that sets the interval or the release
@@ -190,7 +194,7 @@ final class MetaHeadersTests: XCTestCase {
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.first), "42")
     }
 
-    /// The app's own version string, reduced on the way out: the header the server rejects otherwise.
+    /// The app's own version string, reduced on the way out: the server rejects a `meta` without a well-formed one.
     func testTheBundleVersionIsReducedBeforeItIsSent() async throws {
         let harness = try RuntimeHarness(self)
         harness.rawAppVersion = "2.1 beta (77)"
@@ -198,7 +202,6 @@ final class MetaHeadersTests: XCTestCase {
         let runtime = try harness.make()
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        XCTAssertEqual(harness.server.metaRequests.first?.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "2.1.0")
         XCTAssertEqual(token("app", of: harness.server.metaRequests.first), "2.1.0")
     }
 }

@@ -100,7 +100,7 @@ final class DeliveryURLWiringTests: XCTestCase {
         let runtime = try harness.make(harness.configuration(deliveryURL: configured))
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        XCTAssertEqual(harness.server.metaRequests.first?.url, configured)
+        XCTAssertEqual(MetaRequest.withoutQuery(harness.server.metaRequests.first?.url), configured)
     }
 }
 
@@ -114,39 +114,35 @@ final class TarjimConfigurationTests: XCTestCase {
 }
 
 final class ClientIdentityTests: XCTestCase {
-    /// Lower-case token names; `rel/0` and `poll/0` until a release is shown and a `pollAfter` obeyed.
-    func testUserAgentNamesSDKAppOSLanguageReleaseAndPoll() {
-        var identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/0 poll/0")
-        identity.releaseId = 42
-        identity.pollAfter = 1800
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/42 poll/1800")
+    private let full = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar",
+                                      installIdentifier: "8f2c1a", releaseId: 42, pollAfter: 1800, appBuild: "77")
+
+    /// The User-Agent names the SDK and nothing else; everything about the app goes in the `meta` query.
+    func testTheUserAgentIsOnlyTheSDK() {
+        XCTAssertEqual(full.userAgent, "Tarjim-iOS/0.1.0")
     }
 
-    func testInstallIdentifierIsSentOnlyWhenSet() {
-        var identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
-        XCTAssertFalse(identity.userAgent.contains("install/"))
-        identity.installIdentifier = "8f2c1a"
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/0 poll/0 install/8f2c1a")
+    /// In this order; `release` and `pollSeconds` are 0 until a release is shown and an interval obeyed.
+    func testTheMetaQueryNamesTheAppTheReleaseAndTheInterval() {
+        XCTAssertEqual(full.metaQuery, "appVersion=2.3.1&platform=ios&sdkVersion=0.1.0&release=42&pollSeconds=1800"
+                       + "&language=ar&osVersion=17.4&installId=8f2c1a&appBuild=77")
+        let fresh = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
+        XCTAssertEqual(fresh.metaQuery, "appVersion=2.3.1&platform=ios&sdkVersion=0.1.0&release=0&pollSeconds=0&language=ar&osVersion=17.4")
     }
 
-    /// Every value is percent-encoded, keeping RFC 3986's unreserved characters, so the line is always
-    /// `token/value` pairs separated by single spaces.
+    /// Every value is percent-encoded, keeping RFC 3986's unreserved characters, so no value can add a parameter.
     func testEveryValueIsPercentEncoded() {
-        let identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4 beta", language: "zh Hans/TW",
-                                      installIdentifier: "a b")
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4%20beta lang/zh%20Hans%2FTW rel/0 poll/0 install/a%20b")
+        let odd = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4 beta", language: "zh Hans/TW&x=1+y",
+                                 installIdentifier: "a b", appBuild: "1#2")
+        XCTAssertEqual(odd.metaQuery, "appVersion=2.3.1&platform=ios&sdkVersion=0.1.0&release=0&pollSeconds=0"
+                       + "&language=zh%20Hans%2FTW%26x%3D1%2By&osVersion=17.4%20beta&installId=a%20b&appBuild=1%232")
         let unreserved = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "zh-Hant_TW.~",
                                         installIdentifier: nil)
-        XCTAssertTrue(unreserved.userAgent.contains(" lang/zh-Hant_TW.~ "))
-        let plus = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "a+b", installIdentifier: nil)
-        XCTAssertTrue(plus.userAgent.contains(" lang/a%2Bb "), plus.userAgent)
-        let pairs = identity.userAgent.split(separator: " ", omittingEmptySubsequences: false)
-        XCTAssertTrue(pairs.allSatisfy { $0.split(separator: "/").count == 2 }, identity.userAgent)
+        XCTAssertTrue(unreserved.metaQuery.contains("&language=zh-Hant_TW.~&"))
     }
 }
 
-/// The app's version as `X-Tarjim-App-Version` and `app/` carry it: always `MAJOR.MINOR.PATCH`.
+/// The app's version as the `appVersion` query parameter carries it: always `MAJOR.MINOR.PATCH`.
 final class AppVersionTests: XCTestCase {
     func testTheBundleVersionIsReducedToItsCore() {
         let cases: [(String, String)] = [
