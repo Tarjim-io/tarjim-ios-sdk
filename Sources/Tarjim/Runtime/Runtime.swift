@@ -59,6 +59,8 @@ final class Runtime: Sendable {
         let sdkVersion: String
         let appVersion: String
         let osVersion: String
+        /// The app's `CFBundleVersion`, when it has one.
+        var appBuild: String? = nil
     }
 
     /// What `start` builds, read from synchronous lookups.
@@ -286,7 +288,7 @@ final class Runtime: Sendable {
         let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: AppVersion.core(of: environment.appVersion),
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
-                                      installIdentifier: identifier)
+                                      installIdentifier: identifier, appBuild: environment.appBuild)
         // Reads the holder, not the runtime: a closure the engine keeps must not keep the runtime alive.
         let snapshots = self.snapshots
         let appLanguage = environment.appLanguage

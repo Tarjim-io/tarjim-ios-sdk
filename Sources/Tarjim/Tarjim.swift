@@ -170,7 +170,7 @@ public enum Tarjim {
                 try? await Task.sleep(nanoseconds: UInt64(min(seconds, 86_400) * 1_000_000_000))
             },
             sdkVersion: "0.1.0", appVersion: info?["CFBundleShortVersionString"] as? String ?? "0",
-            osVersion: "\(version.majorVersion).\(version.minorVersion)")
+            osVersion: "\(version.majorVersion).\(version.minorVersion)", appBuild: info?["CFBundleVersion"] as? String)
     }
 
     /// Not in the background; read on the main actor, which `start` never blocks on.
@@ -231,9 +231,9 @@ public struct TarjimConfiguration: Sendable {
     /// Called once per condition worth knowing about, on a background thread; nothing is sent anywhere. A condition
     /// that goes away and returns is called again.
     public var onReport: (@Sendable (TarjimReport) -> Void)?
-    /// Off by default. Turning it on sends a random identifier with update checks so active installs can be counted.
-    /// It is a UUID the SDK stores itself: a reinstall and a change of API key each get a new one.
-    public var sendsInstallIdentifier: Bool = false
+    /// On by default; set to `false` to send none. A random identifier goes with update checks so active installs can
+    /// be counted. It is a UUID the SDK stores itself: a reinstall and a change of API key each get a new one.
+    public var sendsInstallIdentifier: Bool = true
     /// Routes `NSLocalizedString`, storyboards and SwiftUI `Text` in the main bundle through Tarjim.
     public var interceptsMainBundle: Bool = true
 

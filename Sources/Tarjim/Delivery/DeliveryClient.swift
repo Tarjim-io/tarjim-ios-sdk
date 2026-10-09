@@ -26,9 +26,10 @@ struct DeliveryClient: Sendable {
     }
 
     func fetchMeta(ifNoneMatch etag: String?) async -> MetaOutcome {
-        var request = URLRequest(url: endpoint.metaURL)
+        // The delivery URL never has a query of its own (validation refuses one), so the identity is the whole query.
+        guard let url = URL(string: endpoint.metaURL.absoluteString + "?" + currentIdentity().metaQuery) else { return .unreadable }
+        var request = URLRequest(url: url)
         applyIdentity(to: &request, withKey: true)
-        request.setValue(identity.appVersion, forHTTPHeaderField: "X-Tarjim-App-Version")
         if let etag {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
@@ -122,16 +123,21 @@ struct DeliveryClient: Sendable {
         case networkFailure
     }
 
-    /// The identity travels with the key only: a CDN request carries none of it.
-    private func applyIdentity(to request: inout URLRequest, withKey: Bool) {
-        guard withKey else { return }
-        request.setValue(endpoint.apiKey, forHTTPHeaderField: "X-Tarjim-Apikey")
-        request.setValue(apiVersion, forHTTPHeaderField: "X-Tarjim-Api-Version")
+    /// The identity with what changes over time read now.
+    private func currentIdentity() -> ClientIdentity {
         var current = identity
         current.language = language()
         current.releaseId = releaseId()
         current.pollAfter = pollAfter()
-        request.setValue(current.userAgent, forHTTPHeaderField: "User-Agent")
+        return current
+    }
+
+    /// The SDK's name travels with the key only: a CDN request carries none of it.
+    private func applyIdentity(to request: inout URLRequest, withKey: Bool) {
+        guard withKey else { return }
+        request.setValue(endpoint.apiKey, forHTTPHeaderField: "X-Tarjim-Apikey")
+        request.setValue(apiVersion, forHTTPHeaderField: "X-Tarjim-Api-Version")
+        request.setValue(identity.userAgent, forHTTPHeaderField: "User-Agent")
     }
 
     /// `nil` when the reference must not be requested.

@@ -48,7 +48,7 @@ struct DeliveryEndpoint: Sendable, Equatable {
     }
 }
 
-/// What the SDK says about itself in `User-Agent`.
+/// What the SDK says about itself: its name in `User-Agent`, and the app in the `meta` query.
 struct ClientIdentity: Sendable, Equatable {
     var sdkVersion: String
     var appVersion: String
@@ -60,20 +60,29 @@ struct ClientIdentity: Sendable, Equatable {
     var releaseId: Int = 0
     /// The `pollAfter` the schedule follows; 0 before any `meta` answered.
     var pollAfter: Int = 0
+    /// The app's `CFBundleVersion`; sent only when it has one.
     var appBuild: String? = nil
 
-    var metaQuery: String {
-        ""
+    /// The query parameter names, in the order they are sent.
+    private enum Parameter: String {
+        case appVersion, platform, sdkVersion, release, pollSeconds, language, osVersion, installId, appBuild
     }
 
     var userAgent: String {
-        var tokens = [("Tarjim-iOS", sdkVersion), ("app", appVersion), ("ios", osVersion), ("lang", language),
-                      ("rel", String(releaseId)), ("poll", String(pollAfter))]
-        if let installIdentifier { tokens.append(("install", installIdentifier)) }
-        return tokens.map { "\($0.0)/\(Self.encoded($0.1))" }.joined(separator: " ")
+        "Tarjim-iOS/\(sdkVersion)"
     }
 
-    // Space and `/` are encoded too, so the line is always single-space-separated `token/value` pairs.
+    /// Without the leading `?`. Every value is encoded, so none can add or end a parameter.
+    var metaQuery: String {
+        var pairs: [(Parameter, String)] = [
+            (.appVersion, appVersion), (.platform, "ios"), (.sdkVersion, sdkVersion), (.release, String(releaseId)),
+            (.pollSeconds, String(pollAfter)), (.language, language), (.osVersion, osVersion),
+        ]
+        if let installIdentifier { pairs.append((.installId, installIdentifier)) }
+        if let appBuild { pairs.append((.appBuild, appBuild)) }
+        return pairs.map { "\($0.0.rawValue)=\(Self.encoded($0.1))" }.joined(separator: "&")
+    }
+
     private static let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
     private static func encoded(_ value: String) -> String {
