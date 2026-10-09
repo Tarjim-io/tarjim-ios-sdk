@@ -16,7 +16,7 @@
 #/     trailing slash, query or fragment
 #/   --out: recording directory to create; must not exist
 #/   --api-version: value for X-Tarjim-Api-Version (default: 2026-07-29)
-#/   --app-version: value for X-Tarjim-App-Version on meta requests, MAJOR.MINOR.PATCH (default: 0.0.0)
+#/   --app-version: sent as the appVersion query parameter on meta requests, MAJOR.MINOR.PATCH (default: 0.0.0)
 #/   --help: Prints this message
 #/
 #/ Afterwards move the directory to Tests/TarjimTests/Fixtures/recorded/<name>/ and run
@@ -149,10 +149,8 @@ bad_key_headers="$work/badkey.hdr"
 bad_key_meta_headers="$work/badkey-meta.hdr"
 printf 'X-Tarjim-Apikey: %s\nX-Tarjim-Api-Version: %s\n' "$TARJIM_APIKEY" "$api_version" >"$key_headers"
 printf 'X-Tarjim-Apikey: tarjim-0-0-0-invalid\nX-Tarjim-Api-Version: %s\n' "$api_version" >"$bad_key_headers"
-# The server rejects a meta request without it; the SDK sends it on meta only, so the other requests don't.
-app_header="$(printf 'X-Tarjim-App-Version: %s' "$app_version")"
-{ cat "$key_headers"; echo "$app_header"; } >"$meta_headers"
-{ cat "$bad_key_headers"; echo "$app_header"; } >"$bad_key_meta_headers"
+cp "$key_headers" "$meta_headers"
+cp "$bad_key_headers" "$bad_key_meta_headers"
 umask 022
 
 stage="$work/stage"
@@ -194,9 +192,12 @@ write_envelope() {
     '{provenance: "recorded", recordedAt: $at, status: $status, headers: $headers, body: $body}' >"$dest"
 }
 
+# The server rejects a meta request without these; only meta carries them, so the later URLs are built from the
+# delivery URL without them. The version is already validated as digits and dots.
 meta_url="$delivery_url"
+meta_request_url="$delivery_url?appVersion=$app_version&platform=ios"
 
-status="$(fetch "$meta_url" "$work/meta.body" "$work/meta.hdr" "$meta_headers")"
+status="$(fetch "$meta_request_url" "$work/meta.body" "$work/meta.hdr" "$meta_headers")"
 if [[ "$status" != "200" ]]; then
   fail "meta answered $status, expected 200"
 fi
@@ -271,7 +272,7 @@ jq -ec '
 ' <"$work/meta.body" | tr -d '\n' >"$work/meta.redacted"
 write_envelope 200 "$work/meta.hdr" "$work/meta.redacted" "$stage/meta.$mode.json"
 
-status="$(fetch "$meta_url" "$work/e401.body" "$work/e401.hdr" "$bad_key_meta_headers")"
+status="$(fetch "$meta_request_url" "$work/e401.body" "$work/e401.hdr" "$bad_key_meta_headers")"
 if [[ "$status" != "401" ]]; then
   fail "meta with an invalid key answered $status, expected 401"
 fi
