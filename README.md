@@ -180,9 +180,10 @@ the app's build number when it has one (`appBuild`) and the install identifier. 
 requests to your delivery host; downloads from the CDN carry no header of the SDK's own and the system's default
 `User-Agent` still goes out.
 
-A random install identifier is sent by default so active installs can be counted, which is why the privacy manifest
-declares it. Set `sendsInstallIdentifier = false` to send none. The SDK creates it per install (new on reinstall and
-when the key changes).
+A random install identifier is sent by default so active installs can be counted. The privacy manifest declares it, and
+an app that ships the SDK must declare it in its App Store privacy answers (as a device ID) unless it sets
+`sendsInstallIdentifier = false`, which sends none and deletes any identifier already stored. The SDK creates it per
+install (new on reinstall and when the key changes).
 
 The language is the one `Tarjim.locale` reports, read at each check: the language chosen with `setLanguage` if the
 release has it, else the user's language if the release has it, else the fallback language. It can name a language whose
