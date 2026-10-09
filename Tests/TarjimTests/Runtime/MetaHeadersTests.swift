@@ -60,7 +60,7 @@ final class MetaHeadersTests: XCTestCase {
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.last), "43")
     }
 
-    /// `poll/` is the interval in force after the SDK's clamp, never the raw value and never a backoff wait.
+    /// `pollSeconds` is the interval in force after the SDK's clamp, never the raw value and never a backoff wait.
     func testPollIsTheClampedIntervalNotABackoff() async throws {
         let harness = try RuntimeHarness(self)
         let release = try Release.one().changing(releaseId: 42, fields: [:])

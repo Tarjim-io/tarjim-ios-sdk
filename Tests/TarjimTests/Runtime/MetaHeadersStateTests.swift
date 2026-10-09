@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// `poll/` and `rel/` as a relaunch reads them back from the stored state, and across answers of every kind.
+/// `pollSeconds` and `release` as a relaunch reads them back from the stored state, and across answers of every kind.
 final class MetaHeadersStateTests: XCTestCase {
     /// The old token names, mapped to the query parameters that now carry them.
     private func token(_ name: String, of request: URLRequest?) -> String? {
