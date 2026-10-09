@@ -60,7 +60,7 @@ struct ClientIdentity: Sendable, Equatable {
     var releaseId: Int = 0
     /// The `pollAfter` the schedule follows; 0 before any `meta` answered.
     var pollAfter: Int = 0
-    /// The app's `CFBundleVersion`; sent only when it has one.
+    /// The app's `CFBundleVersion`; left out when empty or longer than 64 characters, which no server should store.
     var appBuild: String? = nil
 
     /// The query parameter names, in the order they are sent.

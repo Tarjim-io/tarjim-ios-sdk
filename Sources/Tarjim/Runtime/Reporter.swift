@@ -13,7 +13,7 @@ public struct TarjimReport: Equatable, Sendable {
         case fileHashMismatch(hash: String)
         /// A file stayed unavailable for three cycles in a row; its slot keeps the previous text.
         case fileStillUnavailable(hash: String)
-        /// The key or its binding is rejected (`code` as the server sent it); polling continues.
+        /// The server refused the request (`code` as it sent it): the key or its binding, or the app's version; polling continues.
         case configuration(code: String)
         /// An update made the app crash at launch twice and was reverted.
         case revertedAfterLaunchCrashes(checksum: String)
@@ -74,7 +74,10 @@ actor Reporter {
             await remember(rejection: checksum, as: "no-strings:\(checksum)")
             await raise("no-strings:\(checksum)")
         case let .configurationError(code):
-            await raise("config:\(code)", .configuration(code: code), "The key or its binding is rejected: \(code).")
+            let message = code == "delivery.app_version_required"
+                ? "The app's version was refused or missing: \(code)."
+                : "The key or its binding is rejected: \(code)."
+            await raise("config:\(code)", .configuration(code: code), message)
         default:
             break
         }
