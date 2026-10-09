@@ -60,7 +60,7 @@ struct ClientIdentity: Sendable, Equatable {
     var releaseId: Int = 0
     /// The `pollAfter` the schedule follows; 0 before any `meta` answered.
     var pollAfter: Int = 0
-    /// The app's `CFBundleVersion`; left out when empty or longer than 64 characters, which no server should store.
+    /// The app's `CFBundleVersion`; left out when empty or longer than 64 UTF-8 bytes, which no server should store.
     var appBuild: String? = nil
 
     /// The query parameter names, in the order they are sent.
@@ -79,7 +79,7 @@ struct ClientIdentity: Sendable, Equatable {
             (.pollSeconds, String(pollAfter)), (.language, language), (.osVersion, osVersion),
         ]
         if let installIdentifier { pairs.append((.installId, installIdentifier)) }
-        if let appBuild { pairs.append((.appBuild, appBuild)) }
+        if let appBuild, !appBuild.isEmpty, appBuild.utf8.count <= 64 { pairs.append((.appBuild, appBuild)) }
         return pairs.map { "\($0.0.rawValue)=\(Self.encoded($0.1))" }.joined(separator: "&")
     }
 

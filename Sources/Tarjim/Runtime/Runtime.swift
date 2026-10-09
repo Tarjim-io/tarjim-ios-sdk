@@ -294,7 +294,7 @@ final class Runtime: Sendable {
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: AppVersion.core(of: environment.appVersion),
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
                                       installIdentifier: identifier,
-                                      appBuild: environment.appBuild.flatMap { !$0.isEmpty && $0.count <= 64 ? $0 : nil })
+                                      appBuild: environment.appBuild)
         // Reads the holder, not the runtime: a closure the engine keeps must not keep the runtime alive.
         let snapshots = self.snapshots
         let appLanguage = environment.appLanguage
@@ -329,14 +329,16 @@ final class Runtime: Sendable {
     }
 
     /// The identifier in state, else a new one saved there. A held value the SDK could not have made (a damaged or edited
-    /// file) is replaced, never sent.
+    /// file) is replaced, never sent; if the replacement cannot be saved nothing is sent.
     private func installIdentifier() async -> String? {
         if let held = await store.state.installIdentifier, held.count <= 36, UUID(uuidString: held) != nil { return held }
         let created = UUID().uuidString
-        try? await store.update { state in
-            state.installIdentifier = created
+        do {
+            try await store.update { state in state.installIdentifier = created }
+        } catch {
+            return nil
         }
-        return await store.state.installIdentifier
+        return created
     }
 
     /// Turning the identifier off forgets it, so turning it on again starts a new one.
