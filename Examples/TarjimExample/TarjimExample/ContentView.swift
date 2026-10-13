@@ -13,11 +13,10 @@ struct ContentView: View {
             Text(Tarjim.string("items.count", 3)).accessibilityIdentifier("formatted")
             Text(model.status).accessibilityIdentifier("status")
             Button("Activate update") {
-                Task {
-                    _ = await Tarjim.activatePendingUpdate()
-                }
+                Task { await model.activate() }
             }
             .accessibilityIdentifier("activate")
+            Text(model.lastActivation).accessibilityIdentifier("activation")
             Button("Arabic") { choose("ar") }.accessibilityIdentifier("lang-ar")
             Button("System language") { choose(nil) }.accessibilityIdentifier("lang-system")
         }
