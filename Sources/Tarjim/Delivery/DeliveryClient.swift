@@ -9,12 +9,18 @@ struct DeliveryClient: Sendable {
     let apiVersion: String
     /// Asked for at each request; `identity.language` is only the answer when nothing is supplied.
     let language: @Sendable () -> String
+    /// Asked for at each request, like `language`: the release lookups read and the interval the schedule follows.
+    let releaseId: @Sendable () -> Int
+    let pollAfter: @Sendable () -> Int
 
     init(endpoint: DeliveryEndpoint, identity: ClientIdentity, transport: any Transport, apiVersion: String = "2026-07-29",
-         language: (@Sendable () -> String)? = nil) {
+         language: (@Sendable () -> String)? = nil, releaseId: (@Sendable () -> Int)? = nil,
+         pollAfter: (@Sendable () -> Int)? = nil) {
         self.endpoint = endpoint
         self.identity = identity
         self.language = language ?? { identity.language }
+        self.releaseId = releaseId ?? { identity.releaseId }
+        self.pollAfter = pollAfter ?? { identity.pollAfter }
         self.transport = transport
         self.apiVersion = apiVersion
     }
@@ -22,6 +28,7 @@ struct DeliveryClient: Sendable {
     func fetchMeta(ifNoneMatch etag: String?) async -> MetaOutcome {
         var request = URLRequest(url: endpoint.metaURL)
         applyIdentity(to: &request, withKey: true)
+        request.setValue(identity.appVersion, forHTTPHeaderField: "X-Tarjim-App-Version")
         if let etag {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
@@ -122,6 +129,8 @@ struct DeliveryClient: Sendable {
         request.setValue(apiVersion, forHTTPHeaderField: "X-Tarjim-Api-Version")
         var current = identity
         current.language = language()
+        current.releaseId = releaseId()
+        current.pollAfter = pollAfter()
         request.setValue(current.userAgent, forHTTPHeaderField: "User-Agent")
     }
 

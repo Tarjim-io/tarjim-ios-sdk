@@ -8,13 +8,14 @@
 #/   written to disk or passed on a command line.
 #/
 #/ USAGE:
-#/   TARJIM_APIKEY=... capture-fixtures.sh --host <url> --project <id> --out <dir> [--api-version <v>] [--help]
+#/   TARJIM_APIKEY=... capture-fixtures.sh --host <url> --project <id> --out <dir> [--api-version <v>] [--app-version <v>] [--help]
 #/
 #/ SYNOPSIS:
 #/   --host: API base URL: https://<host>[:port][/path], or http://localhost|127.0.0.1[:port][/path]
 #/   --project: numeric project id
 #/   --out: recording directory to create; must not exist
 #/   --api-version: value for X-Tarjim-Api-Version (default: 2026-07-29)
+#/   --app-version: value for X-Tarjim-App-Version on meta requests, MAJOR.MINOR.PATCH (default: 0.0.0)
 #/   --help: Prints this message
 #/
 #/ Afterwards move the directory to Tests/TarjimTests/Fixtures/recorded/<name>/ and run
@@ -49,6 +50,7 @@ host=""
 project=""
 out=""
 api_version="2026-07-29"
+app_version="0.0.0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -84,6 +86,14 @@ while [[ $# -gt 0 ]]; do
       api_version="${1#*=}"
       shift
       ;;
+    --app-version)
+      app_version="${2:?--app-version requires a value}"
+      shift 2
+      ;;
+    --app-version=*)
+      app_version="${1#*=}"
+      shift
+      ;;
     -h|--help)
       usage
       ;;
@@ -115,6 +125,12 @@ if [[ ! "$project" =~ ^[0-9]+$ ]]; then
   fail "--project must be a number"
 fi
 
+# The server's grammar: no leading zeros, at most 32 characters.
+version_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+if [[ ! "$app_version" =~ $version_re || ${#app_version} -gt 32 ]]; then
+  fail "--app-version must be MAJOR.MINOR.PATCH without leading zeros, at most 32 characters"
+fi
+
 if [[ -e "$out" ]]; then
   fail "$out already exists; recordings are never overwritten"
 fi
@@ -137,9 +153,15 @@ trap cleanup EXIT
 # appears in argv, where `ps` shows it.
 umask 077
 key_headers="$work/key.hdr"
+meta_headers="$work/meta-req.hdr"
 bad_key_headers="$work/badkey.hdr"
+bad_key_meta_headers="$work/badkey-meta.hdr"
 printf 'X-Tarjim-Apikey: %s\nX-Tarjim-Api-Version: %s\n' "$TARJIM_APIKEY" "$api_version" >"$key_headers"
 printf 'X-Tarjim-Apikey: tarjim-0-0-0-invalid\nX-Tarjim-Api-Version: %s\n' "$api_version" >"$bad_key_headers"
+# The server rejects a meta request without it; the SDK sends it on meta only, so the other requests don't.
+app_header="$(printf 'X-Tarjim-App-Version: %s' "$app_version")"
+{ cat "$key_headers"; echo "$app_header"; } >"$meta_headers"
+{ cat "$bad_key_headers"; echo "$app_header"; } >"$bad_key_meta_headers"
 umask 022
 
 stage="$work/stage"
@@ -182,7 +204,7 @@ write_envelope() {
 
 meta_url="$host/projects/$project/delivery/meta"
 
-status="$(fetch "$meta_url" "$work/meta.body" "$work/meta.hdr" "$key_headers")"
+status="$(fetch "$meta_url" "$work/meta.body" "$work/meta.hdr" "$meta_headers")"
 if [[ "$status" != "200" ]]; then
   fail "meta answered $status, expected 200"
 fi
@@ -257,7 +279,7 @@ jq -ec '
 ' <"$work/meta.body" | tr -d '\n' >"$work/meta.redacted"
 write_envelope 200 "$work/meta.hdr" "$work/meta.redacted" "$stage/meta.$mode.json"
 
-status="$(fetch "$meta_url" "$work/e401.body" "$work/e401.hdr" "$bad_key_headers")"
+status="$(fetch "$meta_url" "$work/e401.body" "$work/e401.hdr" "$bad_key_meta_headers")"
 if [[ "$status" != "401" ]]; then
   fail "meta with an invalid key answered $status, expected 401"
 fi

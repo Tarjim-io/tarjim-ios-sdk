@@ -25,4 +25,22 @@ final class DeliveryLanguageTests: XCTestCase {
         XCTAssertEqual(transport.requests.count, 2)
         XCTAssertEqual(transport.requests.map(language(of:)), ["en", "ar"])
     }
+
+    /// The app's version goes with `meta` only.
+    func testOriginManifestAndObjectRequestsCarryNoAppVersion() async throws {
+        let transport = FakeTransport()
+        let client = DeliveryClient(endpoint: try DeliveryFixtures.endpoint(), identity: DeliveryFixtures.identity, transport: transport)
+        let meta = try DeliveryFixtures.meta("origin")
+        transport.enqueue(FakeTransport.Answer(status: 200, headers: ["Content-Type": "application/json; charset=utf-8"],
+                                               body: try DeliveryFixtures.manifestBytes()))
+        _ = await client.fetchManifest(meta)
+        let object = try XCTUnwrap(DeliveryFixtures.objects().first)
+        transport.enqueue(FakeTransport.Answer(status: 200, body: try Fixtures.data("release-1/objects/\(object.hash).\(object.fileType)")))
+        _ = await client.fetchObject(meta, hash: object.hash, fileType: object.fileType, expectedSize: object.size)
+        XCTAssertEqual(transport.requests.count, 2)
+        for request in transport.requests {
+            XCTAssertNotNil(request.value(forHTTPHeaderField: "X-Tarjim-Apikey"), "an origin request")
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "\(request.url!)")
+        }
+    }
 }

@@ -7,6 +7,8 @@ final class Snapshot: Sendable {
     let installDirectory: URL?
     let entries: [ManifestBundle]
     let selection: LocaleSelection?
+    /// The release of `installDirectory`, when the install records one.
+    let releaseId: Int?
     // Opened here, once, so a lookup never touches the file system.
     private let otaBundles: [OTAKey: Bundle]
 
@@ -15,7 +17,8 @@ final class Snapshot: Sendable {
         let locale: String
     }
 
-    init(installDirectory: URL?, entries: [ManifestBundle], selection: LocaleSelection?) {
+    init(installDirectory: URL?, entries: [ManifestBundle], selection: LocaleSelection?, releaseId: Int? = nil) {
+        self.releaseId = releaseId
         self.installDirectory = installDirectory
         self.entries = entries
         self.selection = selection

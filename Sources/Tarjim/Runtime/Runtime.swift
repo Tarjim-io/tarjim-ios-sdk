@@ -284,14 +284,16 @@ final class Runtime: Sendable {
         defer { parts.finishStart(); parts.readiness.open() }
         installMainBundleProxy()
         let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
-        let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: environment.appVersion,
+        let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: AppVersion.core(of: environment.appVersion),
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
                                       installIdentifier: identifier)
         // Reads the holder, not the runtime: a closure the engine keeps must not keep the runtime alive.
         let snapshots = self.snapshots
         let appLanguage = environment.appLanguage
+        let store = self.store
         let client = DeliveryClient(endpoint: endpoint, identity: identity, transport: environment.transport,
-                                    language: { Self.selectedLanguage(snapshots.current, appLanguage: appLanguage) })
+                                    language: { Self.selectedLanguage(snapshots.current, appLanguage: appLanguage) },
+                                    releaseId: { snapshots.current.releaseId ?? 0 }, pollAfter: { store.lastPollAfter })
         let parts = self.parts
         let engine = Engine(EngineEnvironment(
             store: store, client: client, snapshots: snapshots, preferences: environment.preferences,

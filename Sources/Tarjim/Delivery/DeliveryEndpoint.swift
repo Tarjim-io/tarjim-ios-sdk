@@ -46,13 +46,23 @@ struct ClientIdentity: Sendable, Equatable {
     var language: String
     /// A random per-install identifier, sent only when set.
     var installIdentifier: String?
+    /// The release of the install lookups read; 0 before any is shown.
+    var releaseId: Int = 0
+    /// The `pollAfter` the schedule follows; 0 before any `meta` answered.
+    var pollAfter: Int = 0
 
     var userAgent: String {
-        var agent = "Tarjim-iOS/\(sdkVersion) app/\(appVersion) iOS/\(osVersion) lang/\(language)"
-        if let installIdentifier {
-            agent += " install/\(installIdentifier)"
-        }
-        return agent
+        var tokens = [("Tarjim-iOS", sdkVersion), ("app", appVersion), ("ios", osVersion), ("lang", language),
+                      ("rel", String(releaseId)), ("poll", String(pollAfter))]
+        if let installIdentifier { tokens.append(("install", installIdentifier)) }
+        return tokens.map { "\($0.0)/\(Self.encoded($0.1))" }.joined(separator: " ")
+    }
+
+    // Space and `/` are encoded too, so the line is always single-space-separated `token/value` pairs.
+    private static let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    private static func encoded(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
 }
 
@@ -64,5 +74,28 @@ extension DeliveryEndpoint: CustomStringConvertible, CustomDebugStringConvertibl
 extension DeliveryEndpoint: CustomReflectable {
     var customMirror: Mirror {
         Mirror(self, children: ["host": host, "projectId": projectId, "metaURL": metaURL], displayStyle: .struct)
+    }
+}
+
+/// The app's version in the one form the server accepts.
+enum AppVersion {
+    private static let fallback = "0.0.0"
+
+    static func core(of version: String) -> String {
+        var parts: [Int] = []
+        var rest = Substring(version)
+        // Parts past the third are dropped unparsed: an overflowing fourth must not force the fallback.
+        while parts.count < 3 {
+            let digits = rest.prefix { $0.isASCII && $0.isNumber }
+            guard !digits.isEmpty else { break }
+            guard let number = Int(digits) else { return fallback }
+            parts.append(number)
+            rest = rest.dropFirst(digits.count)
+            guard rest.first == "." else { break }
+            rest = rest.dropFirst()
+        }
+        guard !parts.isEmpty else { return fallback }
+        let core = (parts + [0, 0, 0]).prefix(3).map(String.init).joined(separator: ".")
+        return core.count <= 32 ? core : fallback
     }
 }
