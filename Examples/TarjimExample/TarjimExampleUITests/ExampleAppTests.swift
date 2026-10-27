@@ -104,8 +104,10 @@ final class ExampleAppTests: XCTestCase {
         XCTAssertEqual(text(app, "status").label, "downloaded")
         XCTAssertEqual(text(app, "proxied").label, "Hello from Tarjim")
         app.buttons["activate"].tap()
-        wait(text(app, "proxied"), toRead: "Hello again from Tarjim", timeout: readiness)
+        // In this order, so a failure says which step broke: the tap's answer, the event, then the text.
+        wait(text(app, "activation"), toRead: "true", timeout: readiness)
         wait(text(app, "status"), toRead: "activated", timeout: readiness)
+        wait(text(app, "proxied"), toRead: "Hello again from Tarjim", timeout: readiness)
     }
 
     /// The next cold start shows a downloaded release, and says so: the app's listener exists before `start`.
