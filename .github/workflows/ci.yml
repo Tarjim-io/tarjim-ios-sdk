@@ -1,9 +1,17 @@
 name: CI
 
+# On demand only. Every job here runs on macOS, which costs ten Linux minutes per minute
+# against the plan's included allowance, and the simulator and example jobs are most of
+# that. `native` (the default) is enough to catch a compile or logic break before a merge;
+# run `full` on a release candidate.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "native = swift test on both toolchains; full = also the simulators and the example app"
+        type: choice
+        default: native
+        options: [native, full]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -35,6 +43,7 @@ jobs:
       - run: swift test --parallel
 
   simulator:
+    if: inputs.scope == 'full'
     # iOS 15 is the minimum but no hosted runner can obtain its simulator runtime (Xcode 16 and 26
     # both refuse the download); it is verified on a device before each release.
     name: simulator (iOS ${{ matrix.ios }})
@@ -84,6 +93,7 @@ jobs:
 
   example:
     name: example (iOS 26.5)
+    if: inputs.scope == 'full'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
