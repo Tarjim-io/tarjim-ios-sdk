@@ -51,7 +51,8 @@ struct DeliveryEndpoint: Sendable, Equatable {
 /// What the SDK says about itself: its name in `User-Agent`, and the app in the `meta` query.
 struct ClientIdentity: Sendable, Equatable {
     var sdkVersion: String
-    var appVersion: String
+    /// `MAJOR.MINOR.PATCH`, or nil when the app has no usable version.
+    var appVersion: String?
     var osVersion: String
     var language: String
     /// A random per-install identifier, sent only when set.
@@ -75,7 +76,7 @@ struct ClientIdentity: Sendable, Equatable {
     /// Without the leading `?`. Every value is encoded, so none can add or end a parameter.
     var metaQuery: String {
         var pairs: [(Parameter, String)] = [
-            (.appVersion, appVersion), (.platform, "ios"), (.sdkVersion, sdkVersion), (.release, String(releaseId)),
+            (.appVersion, appVersion ?? "0.0.0"), (.platform, "ios"), (.sdkVersion, sdkVersion), (.release, String(releaseId)),
             (.pollSeconds, String(pollAfter)), (.language, language), (.osVersion, osVersion),
         ]
         if let installIdentifier { pairs.append((.installId, installIdentifier)) }
@@ -105,7 +106,8 @@ extension DeliveryEndpoint: CustomReflectable {
 enum AppVersion {
     private static let fallback = "0.0.0"
 
-    static func core(of version: String) -> String {
+    static func core(of version: String?) -> String? {
+        guard let version else { return fallback }
         var parts: [Int] = []
         var rest = Substring(version)
         // Parts past the third are dropped unparsed: an overflowing fourth must not force the fallback.

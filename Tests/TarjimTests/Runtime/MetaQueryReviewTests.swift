@@ -86,6 +86,39 @@ final class MetaQueryReviewTests: XCTestCase {
         XCTAssertTrue(report.message.lowercased().contains("version"), report.message)
     }
 
+    /// An app whose bundle has no usable version sends none, and is served as the newest app.
+    func testAnAppWithoutAUsableVersionSendsNone() async throws {
+        for raw in [nil, "", "beta", "V1.2", "1234567890.1"] as [String?] {
+            let harness = try RuntimeHarness(self)
+            harness.rawAppVersion = raw
+            let meta = try await firstMeta(harness)
+            XCTAssertNotNil(meta, String(describing: raw))
+            XCTAssertNil(MetaRequest.query(meta)["appVersion"], String(describing: raw))
+        }
+    }
+
+    func testAVersionWithALeadingVIsSentWithoutIt() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.rawAppVersion = "v2.3"
+        let meta = try await firstMeta(harness)
+        XCTAssertEqual(MetaRequest.query(meta)["appVersion"], "2.3.0")
+    }
+
+    /// Today's server still requires a version: an app without one is served as `0.0.0` rather than refused.
+    func testAnAppWithoutAVersionIsStillServedByAServerThatRequiresOne() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.rawAppVersion = nil
+        let release = try Release.one()
+        harness.server.publish(release)
+        harness.server.answerMeta(CycleFixtures.problem(400, code: "delivery.app_version_required"), release.metaAnswer())
+        let runtime = try harness.make()
+        await runtime.start(foreground: true)
+        await runtime.checkNow()
+        XCTAssertEqual(harness.server.metaRequests.map { MetaRequest.query($0)["appVersion"] }, [nil, "0.0.0"])
+        XCTAssertTrue(harness.reports.value.isEmpty, "\(harness.reports.value)")
+        XCTAssertEqual(harness.server.objectRequests.isEmpty, false, "the release was downloaded")
+    }
+
     /// Each parameter appears once.
     func testNoParameterIsSentTwice() async throws {
         let harness = try RuntimeHarness(self)
@@ -93,8 +126,7 @@ final class MetaQueryReviewTests: XCTestCase {
         let sent = try await firstMeta(harness)
         let meta = try XCTUnwrap(sent)
         let names = URLComponents(url: try XCTUnwrap(meta.url), resolvingAgainstBaseURL: false)?.queryItems?.map(\.name) ?? []
-        XCTAssertEqual(names, ["appVersion", "platform", "sdkVersion", "release", "pollSeconds", "language", "osVersion", "installId",
-                               "appBuild"])
+        XCTAssertEqual(names, ["appVersion", "platform", "sdkVersion", "release", "language", "osVersion", "installId", "appBuild"])
     }
 
     // MARK: Edges

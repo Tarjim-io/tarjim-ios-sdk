@@ -2,11 +2,11 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// `pollSeconds` and `release` as a relaunch reads them back from the stored state, and across answers of every kind.
+/// `release` as a relaunch reads it back from the stored state.
 final class MetaHeadersStateTests: XCTestCase {
     /// The old token names, mapped to the query parameters that now carry them.
     private func token(_ name: String, of request: URLRequest?) -> String? {
-        let parameter = ["app": "appVersion", "rel": "release", "poll": "pollSeconds", "lang": "language",
+        let parameter = ["app": "appVersion", "rel": "release", "lang": "language",
                          "install": "installId", "ios": "osVersion"][name] ?? name
         return MetaRequest.query(request)[parameter]
     }
@@ -39,57 +39,13 @@ final class MetaHeadersStateTests: XCTestCase {
         return harness.server.metaRequests.first
     }
 
-    /// A state file written before the interval in force was stored: the last `pollAfter` stands in for it.
-    func testAnOlderStateFileStillGivesThePollAndRelease() async throws {
+    /// A state file written by an earlier version, with the interval it used to report, still loads.
+    func testAnOlderStateFileStillGivesTheRelease() async throws {
         let harness = try await seeded()
         try editState(harness) { $0["pollInForce"] = nil; $0["lastPollAfter"] = 900 }
         let first = try await relaunch(harness)
-        XCTAssertEqual(token("poll", of: first), "900")
+        XCTAssertNil(MetaRequest.query(first)["pollSeconds"])
         XCTAssertEqual(token("rel", of: first), "42")
-    }
-
-    /// A damaged value never leaves the SDK's own bounds.
-    func testAStoredIntervalIsClampedWhenReadBack() async throws {
-        for (stored, sent) in [(5, "60"), (-7, "60"), (0, "60"), (10_000_000, "86400")] {
-            let harness = try await seeded()
-            try editState(harness) { $0["pollInForce"] = stored }
-            let first = try await relaunch(harness)
-            XCTAssertEqual(token("poll", of: first), sent, "\(stored)")
-        }
-    }
-
-    func testTheIntervalAConfigurationErrorSetSurvivesARelaunch() async throws {
-        let harness = try await seeded()
-        let runtime = try harness.make()
-        await runtime.start(foreground: true)
-        harness.server.answerMeta(CycleFixtures.problem(403, code: "delivery.key_revoked", pollAfter: 600))
-        harness.clock.advance(3600)
-        await runtime.checkNow()
-        harness.server.publish(try Release.one())
-        harness.server.resetRequests()
-        harness.clock.advance(700)
-        let next = try harness.make()
-        await next.start(foreground: true)
-        await next.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.first), "600")
-    }
-
-    /// A good answer after an error sets the interval again.
-    func testAGoodAnswerAfterAnErrorSetsTheIntervalAgain() async throws {
-        let harness = try RuntimeHarness(self)
-        harness.server.publish(try Release.one())
-        let runtime = try harness.make()
-        await runtime.start(foreground: true)
-        await runtime.checkNow()
-        harness.server.answerMeta(CycleFixtures.problem(403, code: "delivery.key_revoked", pollAfter: 600))
-        harness.clock.advance(3600)
-        await runtime.checkNow()
-        harness.server.publish(try Release.one())
-        harness.clock.advance(700)
-        await runtime.checkNow()
-        harness.clock.advance(3600)
-        await runtime.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "1800")
     }
 
     /// Reporting the interval changes nothing about when checks run.

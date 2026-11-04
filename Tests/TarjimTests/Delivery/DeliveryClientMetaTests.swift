@@ -187,7 +187,63 @@ final class DeliveryClientMetaTests: XCTestCase {
     func testAMissingAppVersionAnswerIsAConfigurationError() async throws {
         let answer = FakeTransport.Answer.json(400, ["status": 400, "code": "delivery.app_version_required", "title": "Bad Request"],
                                                headers: ["Content-Type": "application/problem+json"])
-        let (outcome, _) = try await fetch(answer)
+        let transport = FakeTransport()
+        transport.enqueue(answer)
+        let outcome = try await DeliveryFixtures.client(transport).fetchMeta(ifNoneMatch: nil)
         XCTAssertEqual(outcome, .configurationError(code: "delivery.app_version_required", pollAfter: nil))
+        XCTAssertEqual(transport.requests.count, 1, "a version that was sent and refused is not sent again")
+    }
+
+    // MARK: an app with no version
+
+    private static let unversioned = ClientIdentity(sdkVersion: "0.1.0", appVersion: nil, osVersion: "17.4", language: "ar",
+                                                    installIdentifier: nil)
+    private static let versionRequired = FakeTransport.Answer.json(
+        400, ["status": 400, "code": "delivery.app_version_required", "title": "Bad Request"], headers: ["Content-Type": "application/problem+json"])
+
+    /// A server that still requires a version is asked once more as the oldest app, `0.0.0`, so an app without a
+    /// version keeps working against it. The rest of the request is unchanged.
+    func testAServerThatRequiresAVersionIsAskedAgainWithZero() async throws {
+        let transport = FakeTransport()
+        transport.enqueue(Self.versionRequired)
+        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
+        let outcome = try await DeliveryFixtures.client(transport, identity: Self.unversioned).fetchMeta(ifNoneMatch: "\"r42-abc\"")
+        guard case .received = outcome else { return XCTFail("\(outcome)") }
+        XCTAssertEqual(transport.requests.count, 2)
+        let first = try XCTUnwrap(transport.requests.first), second = try XCTUnwrap(transport.requests.last)
+        XCTAssertNil(MetaRequest.query(first)["appVersion"])
+        XCTAssertEqual(second.url?.query, "appVersion=0.0.0&" + (first.url?.query ?? ""))
+        XCTAssertEqual(MetaRequest.withoutQuery(second.url), MetaRequest.withoutQuery(first.url))
+        for header in ["X-Tarjim-Apikey", "X-Tarjim-Api-Version", "User-Agent", "If-None-Match"] {
+            XCTAssertEqual(second.value(forHTTPHeaderField: header), first.value(forHTTPHeaderField: header), header)
+        }
+    }
+
+    func testTheRetryWithZeroHappensOnce() async throws {
+        let transport = FakeTransport()
+        transport.enqueue(Self.versionRequired)
+        transport.enqueue(Self.versionRequired)
+        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
+        let outcome = try await DeliveryFixtures.client(transport, identity: Self.unversioned).fetchMeta(ifNoneMatch: nil)
+        XCTAssertEqual(outcome, .configurationError(code: "delivery.app_version_required", pollAfter: nil))
+        XCTAssertEqual(transport.requests.count, 2)
+    }
+
+    /// Only the refusal for a missing version is asked again; every other answer stands as it is.
+    func testNoOtherAnswerIsAskedAgain() async throws {
+        let others: [FakeTransport.Answer] = [
+            .json(400, ["status": 400, "code": "delivery.bad_request"], headers: ["Content-Type": "application/problem+json"]),
+            .json(404, ["status": 404, "code": "delivery.stage_unreleased", "detail": ["appVersion": NSNull()]],
+                  headers: ["Content-Type": "application/problem+json"]),
+            .json(401, ["status": 401, "code": "unauthorized"], headers: ["Content-Type": "application/problem+json"]),
+            FakeTransport.Answer(status: 503),
+        ]
+        for answer in others {
+            let transport = FakeTransport()
+            transport.enqueue(answer)
+            transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
+            _ = try await DeliveryFixtures.client(transport, identity: Self.unversioned).fetchMeta(ifNoneMatch: nil)
+            XCTAssertEqual(transport.requests.count, 1, "\(answer.status)")
+        }
     }
 }

@@ -57,7 +57,8 @@ final class Runtime: Sendable {
         /// Waits between scheduled checks.
         let sleep: @Sendable (TimeInterval) async -> Void
         let sdkVersion: String
-        let appVersion: String
+        /// `CFBundleShortVersionString`, when the app has one.
+        let appVersion: String?
         let osVersion: String
         /// The app's `CFBundleVersion`, when it has one.
         var appBuild: String? = nil

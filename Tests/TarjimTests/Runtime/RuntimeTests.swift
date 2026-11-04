@@ -16,7 +16,7 @@ final class RuntimeHarness {
     let releaseBlockedSleeps = TestValue<Bool>(false)
     let appLanguage = TestValue<String>("en")
     /// The bundle's version string as the app reports it, before the SDK reduces it.
-    var rawAppVersion = "2.3.1"
+    var rawAppVersion: String? = "2.3.1"
     /// The bundle's build number (`CFBundleVersion`), if the app has one.
     var rawAppBuild: String? = nil
 

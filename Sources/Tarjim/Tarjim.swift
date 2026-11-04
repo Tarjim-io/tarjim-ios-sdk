@@ -169,7 +169,7 @@ public enum Tarjim {
                 guard seconds.isFinite, seconds > 0 else { return }
                 try? await Task.sleep(nanoseconds: UInt64(min(seconds, 86_400) * 1_000_000_000))
             },
-            sdkVersion: "0.1.0", appVersion: info?["CFBundleShortVersionString"] as? String ?? "0",
+            sdkVersion: "0.1.0", appVersion: info?["CFBundleShortVersionString"] as? String,
             osVersion: "\(version.majorVersion).\(version.minorVersion)", appBuild: info?["CFBundleVersion"] as? String)
     }
 
