@@ -222,7 +222,7 @@ extension DeliveryClient: CustomReflectable {
     }
 }
 
-/// Set once, never cleared.
+/// Never cleared: a relaunch makes a new client, which asks without a version again.
 private final class Flag: @unchecked Sendable {
     private let lock = NSLock()
     private var value = false
