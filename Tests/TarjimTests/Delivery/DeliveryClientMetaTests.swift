@@ -250,9 +250,13 @@ final class DeliveryClientMetaTests: XCTestCase {
         transport.enqueue(Self.versionRequired)
         transport.enqueue(Self.versionRequired)
         transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-        let outcome = try await DeliveryFixtures.client(transport, identity: Self.unversioned).fetchMeta(ifNoneMatch: nil)
+        let client = try DeliveryFixtures.client(transport, identity: Self.unversioned)
+        let outcome = await client.fetchMeta(ifNoneMatch: nil)
         XCTAssertEqual(outcome, .configurationError(code: "delivery.app_version_required", pollAfter: nil))
         XCTAssertEqual(transport.requests.count, 2)
+        // The server said it requires a version, whatever became of the second request.
+        _ = await client.fetchMeta(ifNoneMatch: nil)
+        XCTAssertEqual(MetaRequest.query(transport.requests.last)["appVersion"], "0.0.0")
     }
 
     /// Only the refusal for a missing version is asked again; every other answer stands as it is.
@@ -270,8 +274,12 @@ final class DeliveryClientMetaTests: XCTestCase {
             let transport = FakeTransport()
             transport.enqueue(answer)
             transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-            _ = try await DeliveryFixtures.client(transport, identity: Self.unversioned).fetchMeta(ifNoneMatch: nil)
+            let client = try DeliveryFixtures.client(transport, identity: Self.unversioned)
+            _ = await client.fetchMeta(ifNoneMatch: nil)
             XCTAssertEqual(transport.requests.count, 1, "\(answer.status)")
+            // Nor does it make later checks claim a version.
+            _ = await client.fetchMeta(ifNoneMatch: nil)
+            XCTAssertNil(MetaRequest.query(transport.requests.last)["appVersion"], "\(answer.status)")
         }
     }
 }
