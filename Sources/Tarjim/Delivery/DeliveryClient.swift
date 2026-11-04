@@ -9,25 +9,31 @@ struct DeliveryClient: Sendable {
     let apiVersion: String
     /// Asked for at each request; `identity.language` is only the answer when nothing is supplied.
     let language: @Sendable () -> String
-    /// Asked for at each request, like `language`: the release lookups read and the interval the schedule follows.
+    /// Asked for at each request, like `language`: the release lookups read.
     let releaseId: @Sendable () -> Int
-    let pollAfter: @Sendable () -> Int
 
     init(endpoint: DeliveryEndpoint, identity: ClientIdentity, transport: any Transport, apiVersion: String = "2026-07-29",
-         language: (@Sendable () -> String)? = nil, releaseId: (@Sendable () -> Int)? = nil,
-         pollAfter: (@Sendable () -> Int)? = nil) {
+         language: (@Sendable () -> String)? = nil, releaseId: (@Sendable () -> Int)? = nil) {
         self.endpoint = endpoint
         self.identity = identity
         self.language = language ?? { identity.language }
         self.releaseId = releaseId ?? { identity.releaseId }
-        self.pollAfter = pollAfter ?? { identity.pollAfter }
         self.transport = transport
         self.apiVersion = apiVersion
     }
 
     func fetchMeta(ifNoneMatch etag: String?) async -> MetaOutcome {
+        let identity = currentIdentity()
+        let first = await requestMeta(query: identity.metaQuery, ifNoneMatch: etag)
+        // A server that still requires a version would otherwise refuse an app that has none; transitional.
+        guard identity.appVersion == nil, first.status == 400, case .configurationError(code: "delivery.app_version_required", _) = first.outcome
+        else { return first.outcome }
+        return await requestMeta(query: "appVersion=0.0.0&" + identity.metaQuery, ifNoneMatch: etag).outcome
+    }
+
+    private func requestMeta(query: String, ifNoneMatch etag: String?) async -> (outcome: MetaOutcome, status: Int?) {
         // The delivery URL never has a query of its own (validation refuses one), so the identity is the whole query.
-        guard let url = URL(string: endpoint.metaURL.absoluteString + "?" + currentIdentity().metaQuery) else { return .unreadable }
+        guard let url = URL(string: endpoint.metaURL.absoluteString + "?" + query) else { return (.unreadable, nil) }
         var request = URLRequest(url: url)
         applyIdentity(to: &request, withKey: true)
         if let etag {
@@ -38,9 +44,13 @@ struct DeliveryClient: Sendable {
         do {
             (data, response) = try await transport.send(request)
         } catch {
-            return .networkFailure
+            return (.networkFailure, nil)
         }
         let retryAfter = Self.retryAfter(response)
+        return (Self.metaOutcome(data, response, retryAfter: retryAfter), response.statusCode)
+    }
+
+    private static func metaOutcome(_ data: Data, _ response: HTTPURLResponse, retryAfter: Int?) -> MetaOutcome {
         switch response.statusCode {
         case 200:
             guard let meta = try? JSONDecoder().decode(Meta.self, from: data) else { return .unreadable }
@@ -54,7 +64,7 @@ struct DeliveryClient: Sendable {
             return .configurationError(code: "redirect", pollAfter: nil)
         case 400, 401, 403, 404:
             let problem = try? JSONDecoder().decode(Problem.self, from: data)
-            if response.statusCode == 404, let code = problem?.code, Self.unreleasedCodes.contains(code) {
+            if response.statusCode == 404, let code = problem?.code, unreleasedCodes.contains(code) {
                 return .unreleased(pollAfter: problem?.pollAfter)
             }
             return .configurationError(code: problem?.code ?? "unknown", pollAfter: problem?.pollAfter)
@@ -128,7 +138,6 @@ struct DeliveryClient: Sendable {
         var current = identity
         current.language = language()
         current.releaseId = releaseId()
-        current.pollAfter = pollAfter()
         return current
     }
 

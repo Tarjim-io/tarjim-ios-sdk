@@ -302,7 +302,7 @@ final class Runtime: Sendable {
         let store = self.store
         let client = DeliveryClient(endpoint: endpoint, identity: identity, transport: environment.transport,
                                     language: { Self.selectedLanguage(snapshots.current, appLanguage: appLanguage) },
-                                    releaseId: { snapshots.current.releaseId ?? 0 }, pollAfter: { store.lastPollAfter })
+                                    releaseId: { snapshots.current.releaseId ?? 0 })
         let parts = self.parts
         let engine = Engine(EngineEnvironment(
             store: store, client: client, snapshots: snapshots, preferences: environment.preferences,

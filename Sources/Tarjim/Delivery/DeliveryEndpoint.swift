@@ -59,14 +59,12 @@ struct ClientIdentity: Sendable, Equatable {
     var installIdentifier: String?
     /// The release of the install lookups read; 0 before any is shown.
     var releaseId: Int = 0
-    /// The `pollAfter` the schedule follows; 0 before any `meta` answered.
-    var pollAfter: Int = 0
     /// The app's `CFBundleVersion`; left out when empty or longer than 64 UTF-8 bytes, which no server should store.
     var appBuild: String? = nil
 
     /// The query parameter names, in the order they are sent.
     private enum Parameter: String {
-        case appVersion, platform, sdkVersion, release, pollSeconds, language, osVersion, installId, appBuild
+        case appVersion, platform, sdkVersion, release, language, osVersion, installId, appBuild
     }
 
     var userAgent: String {
@@ -75,9 +73,11 @@ struct ClientIdentity: Sendable, Equatable {
 
     /// Without the leading `?`. Every value is encoded, so none can add or end a parameter.
     var metaQuery: String {
-        var pairs: [(Parameter, String)] = [
-            (.appVersion, appVersion ?? "0.0.0"), (.platform, "ios"), (.sdkVersion, sdkVersion), (.release, String(releaseId)),
-            (.pollSeconds, String(pollAfter)), (.language, language), (.osVersion, osVersion),
+        var pairs: [(Parameter, String)] = []
+        if let appVersion { pairs.append((.appVersion, appVersion)) }
+        pairs += [
+            (.platform, "ios"), (.sdkVersion, sdkVersion), (.release, String(releaseId)),
+            (.language, language), (.osVersion, osVersion),
         ]
         if let installIdentifier { pairs.append((.installId, installIdentifier)) }
         if let appBuild, !appBuild.isEmpty, appBuild.utf8.count <= 64 { pairs.append((.appBuild, appBuild)) }
@@ -102,26 +102,26 @@ extension DeliveryEndpoint: CustomReflectable {
     }
 }
 
-/// The app's version in the one form the server accepts.
+/// The app's version in the one form the server accepts: `MAJOR.MINOR.PATCH`, or nil when there is none.
+/// The same rules as the JavaScript SDK, so one app version selects the same release on every platform.
 enum AppVersion {
-    private static let fallback = "0.0.0"
-
     static func core(of version: String?) -> String? {
-        guard let version else { return fallback }
-        var parts: [Int] = []
-        var rest = Substring(version)
-        // Parts past the third are dropped unparsed: an overflowing fourth must not force the fallback.
-        while parts.count < 3 {
-            let digits = rest.prefix { $0.isASCII && $0.isNumber }
-            guard !digits.isEmpty else { break }
-            guard let number = Int(digits) else { return fallback }
-            parts.append(number)
-            rest = rest.dropFirst(digits.count)
-            guard rest.first == "." else { break }
-            rest = rest.dropFirst()
+        guard let version else { return nil }
+        // Scalars, not characters: a combining mark after the `v` must not hide it.
+        let scalars = Array(version.unicodeScalars)
+        let leading = scalars.dropFirst(scalars.first == "v" ? 1 : 0).prefix { ("0"..."9").contains($0) || $0 == "." }
+        var numbers = String(String.UnicodeScalarView(leading)).split(separator: ".", omittingEmptySubsequences: false)
+        // One trailing dot is allowed ("1.2."); an empty part anywhere else is no version.
+        if numbers.count > 1, numbers.last == "" { numbers.removeLast() }
+        var parts: [String] = []
+        for index in 0..<3 {
+            let digits = index < numbers.count ? numbers[index] : "0"
+            guard !digits.isEmpty else { return nil }
+            let trimmed = digits.drop { $0 == "0" }
+            let part = trimmed.isEmpty ? "0" : String(trimmed)
+            guard part.utf8.count <= 9 else { return nil }
+            parts.append(part)
         }
-        guard !parts.isEmpty else { return fallback }
-        let core = (parts + [0, 0, 0]).prefix(3).map(String.init).joined(separator: ".")
-        return core.count <= 32 ? core : fallback
+        return parts.joined(separator: ".")
     }
 }
