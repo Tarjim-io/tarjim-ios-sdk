@@ -171,10 +171,9 @@ reported. Nothing is sent over the network; without a handler a line goes to the
 ## Privacy
 
 The SDK ships a privacy manifest. It does not track. Update checks (`meta` requests) carry a query naming the app's
-version reduced to `MAJOR.MINOR.PATCH` (`appVersion`, sent as `0.0.0` when it cannot be read as numbers), the platform
-(`ios`), the SDK version, the release the app is showing (`release`, `0` when none), the polling interval the SDK is
-following (`pollSeconds`: the server's `pollAfter` within the SDK's bounds, or the SDK's default when an answer names
-none; never a backoff wait, and `0` before the first answer), the language selected for Tarjim text, the iOS version,
+version reduced to `MAJOR.MINOR.PATCH` (`appVersion`; left out when the version cannot be read as numbers, and then
+sent as `0.0.0` only to a server that refuses a check without one), the platform (`ios`), the SDK version, the release
+the app is showing (`release`, `0` when none), the language selected for Tarjim text, the iOS version,
 the app's build number when it has one (`appBuild`) and the install identifier. Every value is percent-encoded. The
 `User-Agent` names only the SDK (`Tarjim-iOS/<version>`) and goes with the API key on `meta`, manifest and object
 requests to your delivery host; downloads from the CDN carry no header of the SDK's own and the system's default

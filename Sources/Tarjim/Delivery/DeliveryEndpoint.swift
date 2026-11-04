@@ -107,7 +107,7 @@ extension DeliveryEndpoint: CustomReflectable {
 enum AppVersion {
     static func core(of version: String?) -> String? {
         guard let version else { return nil }
-        // Scalars, not characters: a combining mark after the `v` must not hide it.
+        // Scalars, not characters: a combining mark ends the digits before it, as it does in the JavaScript SDK.
         let scalars = Array(version.unicodeScalars)
         let leading = scalars.dropFirst(scalars.first == "v" ? 1 : 0).prefix { ("0"..."9").contains($0) || $0 == "." }
         var numbers = String(String.UnicodeScalarView(leading)).split(separator: ".", omittingEmptySubsequences: false)
