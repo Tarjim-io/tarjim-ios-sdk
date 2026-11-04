@@ -219,6 +219,32 @@ final class DeliveryClientMetaTests: XCTestCase {
         }
     }
 
+    /// Once a server has refused a check for want of a version, later checks send `0.0.0` from the start instead of
+    /// being refused first each time. The client's copies share this, as the cycle and the runtime hold copies.
+    func testAfterOneRefusalZeroIsSentFromTheStart() async throws {
+        let transport = FakeTransport()
+        transport.enqueue(Self.versionRequired)
+        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
+        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
+        let client = try DeliveryFixtures.client(transport, identity: Self.unversioned)
+        _ = await client.fetchMeta(ifNoneMatch: nil)
+        let copy = client
+        let outcome = await copy.fetchMeta(ifNoneMatch: nil)
+        guard case .received = outcome else { return XCTFail("\(outcome)") }
+        XCTAssertEqual(transport.requests.map { MetaRequest.query($0)["appVersion"] }, [nil, "0.0.0", "0.0.0"])
+    }
+
+    /// A fresh client, as after a relaunch, starts again without a version.
+    func testANewClientStartsWithoutAVersionAgain() async throws {
+        let transport = FakeTransport()
+        transport.enqueue(Self.versionRequired)
+        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
+        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
+        _ = await (try DeliveryFixtures.client(transport, identity: Self.unversioned)).fetchMeta(ifNoneMatch: nil)
+        _ = await (try DeliveryFixtures.client(transport, identity: Self.unversioned)).fetchMeta(ifNoneMatch: nil)
+        XCTAssertEqual(transport.requests.map { MetaRequest.query($0)["appVersion"] }, [nil, "0.0.0", nil])
+    }
+
     func testTheRetryWithZeroHappensOnce() async throws {
         let transport = FakeTransport()
         transport.enqueue(Self.versionRequired)
