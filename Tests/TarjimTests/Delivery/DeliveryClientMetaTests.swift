@@ -236,6 +236,8 @@ final class DeliveryClientMetaTests: XCTestCase {
             .json(404, ["status": 404, "code": "delivery.stage_unreleased", "detail": ["appVersion": NSNull()]],
                   headers: ["Content-Type": "application/problem+json"]),
             .json(401, ["status": 401, "code": "unauthorized"], headers: ["Content-Type": "application/problem+json"]),
+            .json(403, ["status": 403, "code": "delivery.app_version_required"], headers: ["Content-Type": "application/problem+json"]),
+            .json(404, ["status": 404, "code": "delivery.app_version_required"], headers: ["Content-Type": "application/problem+json"]),
             FakeTransport.Answer(status: 503),
         ]
         for answer in others {

@@ -161,12 +161,15 @@ final class AppVersionTests: XCTestCase {
             ("v1.2", "1.2.0"), ("v2.3.1-beta", "2.3.1"),
             ("V1.2", nil), ("vv1", nil), ("v", nil), (" 1.2", nil), ("-1.2", nil), ("beta", nil), ("", nil), (".", nil), (".5", nil),
             // An empty part between dots is not a zero.
-            ("1..2", nil), ("1.2..3", nil),
+            ("1..2", nil), ("1.2..3", nil), ("1..", nil), ("1.2..", nil),
+            ("00", "0.0.0"), ("0.00.000", "0.0.0"),
             // Nine digits a part at most, counted after leading zeros go.
             ("123456789.1", "123456789.1.0"), ("1234567890.1", nil), ("1.1234567890", nil), ("0000000001.2", "1.2.0"),
             ("99999999999999999999.1", nil), ("1.99999999999999999999", nil),
             // Only ASCII digits are digits.
             ("\u{0661}.\u{0662}", nil), ("1.\u{0662}", "1.0.0"),
+            // A combining mark ends the digits it follows, as it does in the JavaScript SDK.
+            ("1\u{0301}.2", "1.0.0"), ("1.2\u{0301}", "1.2.0"),
         ]
         for (raw, core) in cases {
             XCTAssertEqual(AppVersion.core(of: raw), core, raw)

@@ -88,13 +88,12 @@ final class MetaHeadersTests: XCTestCase {
         let next = try harness.make()
         await next.start(foreground: true)
         await next.checkNow()
-        XCTAssertGreaterThanOrEqual(harness.server.metaRequests.count, 6)
+        XCTAssertEqual(harness.server.metaRequests.count, 7, "one after each answer, and the relaunch")
         for request in harness.server.requests {
             XCTAssertNil(MetaRequest.query(request)["pollSeconds"], "\(request.url!)")
             XCTAssertFalse(request.url?.query?.contains("poll") ?? false, "\(request.url!)")
         }
     }
-
 
     func testARelaunchSendsWhatItLastKnew() async throws {
         let harness = try RuntimeHarness(self)
