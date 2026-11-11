@@ -198,88 +198,27 @@ final class DeliveryClientMetaTests: XCTestCase {
 
     private static let unversioned = ClientIdentity(sdkVersion: "0.1.0", appVersion: nil, osVersion: "17.4", language: "ar",
                                                     installIdentifier: nil)
-    private static let versionRequired = FakeTransport.Answer.json(
-        400, ["status": 400, "code": "delivery.app_version_required", "title": "Bad Request"], headers: ["Content-Type": "application/problem+json"])
 
-    /// A server that still requires a version is asked once more as the oldest app, `0.0.0`, so an app without a
-    /// version keeps working against it. The rest of the request is unchanged.
-    func testAServerThatRequiresAVersionIsAskedAgainWithZero() async throws {
-        let transport = FakeTransport()
-        transport.enqueue(Self.versionRequired)
-        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-        let outcome = try await DeliveryFixtures.client(transport, identity: Self.unversioned).fetchMeta(ifNoneMatch: "\"r42-abc\"")
-        guard case .received = outcome else { return XCTFail("\(outcome)") }
-        XCTAssertEqual(transport.requests.count, 2)
-        let first = try XCTUnwrap(transport.requests.first), second = try XCTUnwrap(transport.requests.last)
-        XCTAssertNil(MetaRequest.query(first)["appVersion"])
-        XCTAssertEqual(second.url?.query, "appVersion=0.0.0&" + (first.url?.query ?? ""))
-        XCTAssertEqual(MetaRequest.withoutQuery(second.url), MetaRequest.withoutQuery(first.url))
-        for header in ["X-Tarjim-Apikey", "X-Tarjim-Api-Version", "User-Agent", "If-None-Match"] {
-            XCTAssertEqual(second.value(forHTTPHeaderField: header), first.value(forHTTPHeaderField: header), header)
-        }
-    }
-
-    /// Once a server has refused a check for want of a version, later checks send `0.0.0` from the start instead of
-    /// being refused first each time. The client's copies share this, as the cycle and the runtime hold copies.
-    func testAfterOneRefusalZeroIsSentFromTheStart() async throws {
-        let transport = FakeTransport()
-        transport.enqueue(Self.versionRequired)
-        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-        let client = try DeliveryFixtures.client(transport, identity: Self.unversioned)
-        _ = await client.fetchMeta(ifNoneMatch: nil)
-        let copy = client
-        let outcome = await copy.fetchMeta(ifNoneMatch: nil)
-        guard case .received = outcome else { return XCTFail("\(outcome)") }
-        XCTAssertEqual(transport.requests.map { MetaRequest.query($0)["appVersion"] }, [nil, "0.0.0", "0.0.0"])
-    }
-
-    /// A fresh client, as after a relaunch, starts again without a version.
-    func testANewClientStartsWithoutAVersionAgain() async throws {
-        let transport = FakeTransport()
-        transport.enqueue(Self.versionRequired)
-        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-        _ = await (try DeliveryFixtures.client(transport, identity: Self.unversioned)).fetchMeta(ifNoneMatch: nil)
-        _ = await (try DeliveryFixtures.client(transport, identity: Self.unversioned)).fetchMeta(ifNoneMatch: nil)
-        XCTAssertEqual(transport.requests.map { MetaRequest.query($0)["appVersion"] }, [nil, "0.0.0", nil])
-    }
-
-    func testTheRetryWithZeroHappensOnce() async throws {
-        let transport = FakeTransport()
-        transport.enqueue(Self.versionRequired)
-        transport.enqueue(Self.versionRequired)
-        transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
-        let client = try DeliveryFixtures.client(transport, identity: Self.unversioned)
-        let outcome = await client.fetchMeta(ifNoneMatch: nil)
-        XCTAssertEqual(outcome, .configurationError(code: "delivery.app_version_required", pollAfter: nil))
-        XCTAssertEqual(transport.requests.count, 2)
-        // The server said it requires a version, whatever became of the second request.
-        _ = await client.fetchMeta(ifNoneMatch: nil)
-        XCTAssertEqual(MetaRequest.query(transport.requests.last)["appVersion"], "0.0.0")
-    }
-
-    /// Only the refusal for a missing version is asked again; every other answer stands as it is.
-    func testNoOtherAnswerIsAskedAgain() async throws {
-        let others: [FakeTransport.Answer] = [
+    /// An app without a version never claims one, whatever the server answers: a missing version is the newest
+    /// app, and `0.0.0` would select the oldest. Each answer stands as it is, with one request.
+    func testAnAppWithoutAVersionNeverSendsOne() async throws {
+        let answers: [FakeTransport.Answer] = [
+            .json(400, ["status": 400, "code": "delivery.app_version_required"], headers: ["Content-Type": "application/problem+json"]),
             .json(400, ["status": 400, "code": "delivery.bad_request"], headers: ["Content-Type": "application/problem+json"]),
             .json(404, ["status": 404, "code": "delivery.stage_unreleased", "detail": ["appVersion": NSNull()]],
                   headers: ["Content-Type": "application/problem+json"]),
             .json(401, ["status": 401, "code": "unauthorized"], headers: ["Content-Type": "application/problem+json"]),
-            .json(403, ["status": 403, "code": "delivery.app_version_required"], headers: ["Content-Type": "application/problem+json"]),
-            .json(404, ["status": 404, "code": "delivery.app_version_required"], headers: ["Content-Type": "application/problem+json"]),
             FakeTransport.Answer(status: 503),
         ]
-        for answer in others {
+        for answer in answers {
             let transport = FakeTransport()
             transport.enqueue(answer)
             transport.enqueue(FakeTransport.Answer(try DeliveryFixtures.metaEnvelope("cdn")))
             let client = try DeliveryFixtures.client(transport, identity: Self.unversioned)
             _ = await client.fetchMeta(ifNoneMatch: nil)
             XCTAssertEqual(transport.requests.count, 1, "\(answer.status)")
-            // Nor does it make later checks claim a version.
             _ = await client.fetchMeta(ifNoneMatch: nil)
-            XCTAssertNil(MetaRequest.query(transport.requests.last)["appVersion"], "\(answer.status)")
+            XCTAssertEqual(transport.requests.map { MetaRequest.query($0)["appVersion"] }, [nil, nil], "\(answer.status)")
         }
     }
 }

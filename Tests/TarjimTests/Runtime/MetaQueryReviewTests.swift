@@ -104,21 +104,6 @@ final class MetaQueryReviewTests: XCTestCase {
         XCTAssertEqual(MetaRequest.query(meta)["appVersion"], "2.3.0")
     }
 
-    /// Today's server still requires a version: an app without one is served as `0.0.0` rather than refused.
-    func testAnAppWithoutAVersionIsStillServedByAServerThatRequiresOne() async throws {
-        let harness = try RuntimeHarness(self)
-        harness.rawAppVersion = nil
-        let release = try Release.one()
-        harness.server.publish(release)
-        harness.server.answerMeta(CycleFixtures.problem(400, code: "delivery.app_version_required"), release.metaAnswer())
-        let runtime = try harness.make()
-        await runtime.start(foreground: true)
-        await runtime.checkNow()
-        XCTAssertEqual(harness.server.metaRequests.map { MetaRequest.query($0)["appVersion"] }, [nil, "0.0.0"])
-        XCTAssertTrue(harness.reports.value.isEmpty, "\(harness.reports.value)")
-        XCTAssertEqual(harness.server.objectRequests.isEmpty, false, "the release was downloaded")
-    }
-
     /// Each parameter appears once.
     func testNoParameterIsSentTwice() async throws {
         let harness = try RuntimeHarness(self)
