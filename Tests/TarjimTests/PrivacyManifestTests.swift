@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// What the SDK declares to Apple must match what it does: no tracking, one optional identifier, no required-reason API.
+/// What the SDK declares to Apple must match what it does: no tracking, what an update check sends, no required-reason API.
 final class PrivacyManifestTests: XCTestCase {
     private func manifest() throws -> [String: Any] {
         let url = try XCTUnwrap(PrivacyManifest.url, "PrivacyInfo.xcprivacy ships with the SDK")
@@ -15,16 +15,25 @@ final class PrivacyManifestTests: XCTestCase {
         XCTAssertEqual((manifest["NSPrivacyTrackingDomains"] as? [String]) ?? [], [])
     }
 
-    /// The per-install identifier (on by default; `sendsInstallIdentifier = false` sends none) is the only data collected:
-    /// not linked to the user, not used for tracking, used to count active installs.
-    func testTheInstallIdentifierIsTheOnlyCollectedData() throws {
+    /// What an update check sends is declared, neither linked to the user nor used for tracking: the per-install
+    /// identifier (on by default; `sendsInstallIdentifier = false` sends none) to count active installs, and the app
+    /// and device details in the query (app version, iOS version, build number, language), which pick the release
+    /// and are counted.
+    func testWhatAnUpdateCheckSendsIsDeclared() throws {
         let collected = try XCTUnwrap(try manifest()["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
-        XCTAssertEqual(collected.count, 1)
-        let identifier = try XCTUnwrap(collected.first)
-        XCTAssertEqual(identifier["NSPrivacyCollectedDataType"] as? String, "NSPrivacyCollectedDataTypeDeviceID")
-        XCTAssertEqual(identifier["NSPrivacyCollectedDataTypeLinked"] as? Bool, false)
-        XCTAssertEqual(identifier["NSPrivacyCollectedDataTypeTracking"] as? Bool, false)
-        XCTAssertEqual(identifier["NSPrivacyCollectedDataTypePurposes"] as? [String], ["NSPrivacyCollectedDataTypePurposeAnalytics"])
+        let byType = Dictionary(uniqueKeysWithValues: collected.compactMap { entry in
+            (entry["NSPrivacyCollectedDataType"] as? String).map { ($0, entry) }
+        })
+        XCTAssertEqual(Set(byType.keys), ["NSPrivacyCollectedDataTypeDeviceID", "NSPrivacyCollectedDataTypeOtherDiagnosticData"])
+        XCTAssertEqual(collected.count, 2)
+        for entry in collected {
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, false)
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeTracking"] as? Bool, false)
+        }
+        XCTAssertEqual(byType["NSPrivacyCollectedDataTypeDeviceID"]?["NSPrivacyCollectedDataTypePurposes"] as? [String],
+                       ["NSPrivacyCollectedDataTypePurposeAnalytics"])
+        XCTAssertEqual(Set(byType["NSPrivacyCollectedDataTypeOtherDiagnosticData"]?["NSPrivacyCollectedDataTypePurposes"] as? [String] ?? []),
+                       ["NSPrivacyCollectedDataTypePurposeAppFunctionality", "NSPrivacyCollectedDataTypePurposeAnalytics"])
     }
 
     /// No required-reason API is declared, so none may be used.
