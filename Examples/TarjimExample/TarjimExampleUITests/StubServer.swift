@@ -38,7 +38,8 @@ final class StubServer: @unchecked Sendable {
         let objects: [String: Data]
     }
 
-    /// The tests launch the app with this project id.
+    /// The tests launch the app with `<base>/t/1/projects/1/delivery/meta` as its delivery URL.
+    private static let tenantId = 1
     private static let projectId = 1
     private static let slicesPath = "released/slices/"
 
@@ -160,8 +161,8 @@ final class StubServer: @unchecked Sendable {
 
     private static func answer(target: String, headers: [String: String], release: Built) -> (Int, [String: String], Data) {
         let path = target.split(separator: "?", maxSplits: 1).first.map(String.init) ?? target
-        // Exact paths, project id included: a wrong id or base URL must not be served.
-        let base = "/projects/\(Self.projectId)/delivery/"
+        // Exact paths, tenant and project ids included: a wrong id or base URL must not be served.
+        let base = "/t/\(Self.tenantId)/projects/\(Self.projectId)/delivery/"
         if path == base + "meta" {
             let match = headers.first { $0.key.lowercased() == "if-none-match" }?.value
             if match == release.etag { return (304, ["ETag": release.etag], Data()) }

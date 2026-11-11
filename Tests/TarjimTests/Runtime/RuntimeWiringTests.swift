@@ -5,7 +5,7 @@ import XCTest
 /// The runtime's wiring that only shows over a whole session: timers stopped, time away counted, the key kept private.
 final class RuntimeWiringTests: XCTestCase {
     private var storeIdentifier: String {
-        StoreIdentifier.make(host: DeliveryFixtures.host, projectId: DeliveryFixtures.projectId, apiKey: DeliveryFixtures.apiKey)
+        StoreIdentifier.make(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: DeliveryFixtures.apiKey)
     }
 
     /// Resigning really stops the timers: once released, a stopped schedule makes no further request.

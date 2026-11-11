@@ -16,15 +16,18 @@ final class RuntimeHarness {
     let releaseBlockedSleeps = TestValue<Bool>(false)
     let appLanguage = TestValue<String>("en")
     /// The bundle's version string as the app reports it, before the SDK reduces it.
-    var rawAppVersion = "2.3.1"
+    var rawAppVersion: String? = "2.3.1"
+    /// The bundle's build number (`CFBundleVersion`), if the app has one.
+    var rawAppBuild: String? = nil
 
     init(_ test: XCTestCase) throws {
         root = try StoreFixtures.root(for: test)
         appBundle = try LookupFixtures.appBundle(for: test)
     }
 
-    func configuration(apiKey: String = DeliveryFixtures.apiKey, sendsInstallIdentifier: Bool = true) -> TarjimConfiguration {
-        var configuration = TarjimConfiguration(projectId: DeliveryFixtures.projectId, apiKey: apiKey, host: DeliveryFixtures.host,
+    func configuration(apiKey: String = DeliveryFixtures.apiKey, sendsInstallIdentifier: Bool = true,
+                       deliveryURL: URL = DeliveryFixtures.deliveryURL) -> TarjimConfiguration {
+        var configuration = TarjimConfiguration(deliveryURL: deliveryURL, apiKey: apiKey,
                                                 defaultBundle: .namespace("default"), fallbackLanguage: "en")
         let reports = self.reports
         configuration.onReport = { report in reports.value.append(report) }
@@ -34,7 +37,7 @@ final class RuntimeHarness {
 
     func make(_ configuration: TarjimConfiguration? = nil, transport: (any Transport)? = nil) throws -> Runtime {
         let clock = self.clock, sleeps = self.sleeps, instantSleeps = self.instantSleeps
-        let release = self.releaseBlockedSleeps, appLanguage = self.appLanguage, rawAppVersion = self.rawAppVersion
+        let release = self.releaseBlockedSleeps, appLanguage = self.appLanguage, rawAppVersion = self.rawAppVersion, rawAppBuild = self.rawAppBuild
         let environment = Runtime.Environment(root: root, transport: transport ?? server, appBundle: appBundle,
                                               preferences: { ["en-US"] }, appLanguage: { appLanguage.value }, now: { clock.now }, uptime: { clock.uptime },
                                               random: { 0 }, sleep: { seconds in
@@ -45,7 +48,7 @@ final class RuntimeHarness {
                                                       }
                                                   }
                                               },
-                                              sdkVersion: "0.1.0", appVersion: rawAppVersion, osVersion: "17.4")
+                                              sdkVersion: "0.1.0", appVersion: rawAppVersion, osVersion: "17.4", appBuild: rawAppBuild)
         return try Runtime(configuration: configuration ?? self.configuration(), environment: environment)
     }
 }
@@ -121,9 +124,7 @@ final class RuntimeTests: XCTestCase {
             harness.clock.advance(3600)
             await runtime.checkNow()
         }
-        let agents = harness.server.metaRequests.compactMap { $0.value(forHTTPHeaderField: "User-Agent") }
-        XCTAssertEqual(agents.count, 2)
-        let identifiers = agents.compactMap { $0.components(separatedBy: " install/").dropFirst().first }
+        let identifiers = harness.server.metaRequests.compactMap { MetaRequest.query($0)["installId"] }
         XCTAssertEqual(identifiers.count, 2)
         XCTAssertEqual(Set(identifiers).count, 1, "stable across launches")
         XCTAssertNotNil(UUID(uuidString: identifiers[0]))
@@ -133,8 +134,8 @@ final class RuntimeTests: XCTestCase {
         let runtime = try off.make(off.configuration(sendsInstallIdentifier: false))
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        let agent = try XCTUnwrap(off.server.metaRequests.first?.value(forHTTPHeaderField: "User-Agent"))
-        XCTAssertFalse(agent.contains("install/"))
+        let first = try XCTUnwrap(off.server.metaRequests.first)
+        XCTAssertNil(MetaRequest.query(first)["installId"])
     }
 
     /// An app version built with another key starts empty, and the old key's files are removed.
@@ -144,7 +145,7 @@ final class RuntimeTests: XCTestCase {
         let old = try harness.make()
         await old.start(foreground: true)
         await old.checkNow()
-        let oldStore = harness.root.appendingPathComponent("Tarjim/v1/\(StoreIdentifier.make(host: DeliveryFixtures.host, projectId: DeliveryFixtures.projectId, apiKey: DeliveryFixtures.apiKey))")
+        let oldStore = harness.root.appendingPathComponent("Tarjim/v1/\(StoreIdentifier.make(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: DeliveryFixtures.apiKey))")
         XCTAssertTrue(StoreFixtures.exists(oldStore))
         let renewed = try harness.make(harness.configuration(apiKey: "another-test-key-0123456789"))
         await renewed.start(foreground: true)
@@ -176,9 +177,9 @@ final class RuntimeTests: XCTestCase {
 
 final class PublicAPITests: XCTestCase {
     func testTheConfigurationNeedsOnlyWhatHasNoSafeDefault() {
-        let configuration = TarjimConfiguration(projectId: 7, apiKey: "k", host: URL(string: "https://api.example.invalid")!,
+        let configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: "k",
                                                 defaultBundle: .custom("home"), fallbackLanguage: "en")
-        XCTAssertFalse(configuration.sendsInstallIdentifier, "opt-in")
+        XCTAssertTrue(configuration.sendsInstallIdentifier, "on by default; an app can turn it off")
         XCTAssertTrue(configuration.interceptsMainBundle)
         XCTAssertNil(configuration.onReport)
     }

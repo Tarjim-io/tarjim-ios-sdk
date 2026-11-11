@@ -10,8 +10,8 @@ enum StoreError: Error, Equatable {
 }
 
 enum StoreIdentifier {
-    static func make(host: URL, projectId: Int, apiKey: String) -> String {
-        let digest = SHA256.hash(data: Data("\(host.absoluteString)\n\(projectId)\n\(apiKey)".utf8))
+    static func make(deliveryURL: URL, apiKey: String) -> String {
+        let digest = SHA256.hash(data: Data("\(deliveryURL.absoluteString)\n\(apiKey)".utf8))
         return String(hex(digest).prefix(32))
     }
 }
@@ -43,25 +43,10 @@ private final class InstallNumbers: @unchecked Sendable {
     }
 }
 
-/// The saved `lastPollAfter`, readable without awaiting the store.
-private final class PollMirror: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = 0
-
-    var current: Int {
-        get { lock.withLock { value } }
-        set { lock.withLock { value = newValue } }
-    }
-}
-
 /// The only code that writes files. Takes verified bytes; never talks to the network.
 actor Store {
     nonisolated let directory: URL
     private(set) var state: StoreState
-    private let pollMirror = PollMirror()
-    /// The interval the schedule follows, 0 before any answer set one. Updated by every save, so a request
-    /// never reads an older one than the last that was persisted.
-    nonisolated var lastPollAfter: Int { pollMirror.current }
     private var protectedDirectories: Set<String> = []
     /// Built but not yet recorded: `cleanup` may run in between. Recording one releases only that one; an
     /// abandoned build stays until the next launch's cleanup.
@@ -81,7 +66,6 @@ actor Store {
         values.isExcludedFromBackup = true
         try tarjimURL.setResourceValues(values)
         state = Store.loadState(from: directory.appendingPathComponent("state.json"), sdkVersion: sdkVersion)
-        pollMirror.current = Store.mirroredPoll(state)
     }
 
     private static func loadState(from file: URL, sdkVersion: String) -> StoreState {
@@ -94,13 +78,6 @@ actor Store {
             loaded.sdkVersion = sdkVersion
         }
         return sanitised(loaded)
-    }
-
-    /// A state file written before `pollInForce` existed still has `lastPollAfter`. The clamp is the cycle's own
-    /// (60 s to a day): the file may be damaged, and the value goes out in a header.
-    private static func mirroredPoll(_ state: StoreState) -> Int {
-        guard let value = state.pollInForce ?? state.lastPollAfter else { return 0 }
-        return Bounds.poll(value)
     }
 
     /// state.json is data from disk: its names become path components, so they are checked like server input.
@@ -143,7 +120,6 @@ actor Store {
             throw error
         }
         self.state = state
-        pollMirror.current = Store.mirroredPoll(state)
     }
 
     func stage(checksum: String, hash: String, fileType: String, verifiedBytes: Data) throws {

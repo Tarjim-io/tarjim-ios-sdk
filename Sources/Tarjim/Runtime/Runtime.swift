@@ -57,8 +57,11 @@ final class Runtime: Sendable {
         /// Waits between scheduled checks.
         let sleep: @Sendable (TimeInterval) async -> Void
         let sdkVersion: String
-        let appVersion: String
+        /// `CFBundleShortVersionString`, when the app has one.
+        let appVersion: String?
         let osVersion: String
+        /// The app's `CFBundleVersion`, when it has one.
+        var appBuild: String? = nil
     }
 
     /// What `start` builds, read from synchronous lookups.
@@ -223,10 +226,10 @@ final class Runtime: Sendable {
     init(configuration: TarjimConfiguration, environment: Environment) throws {
         self.configuration = configuration
         self.environment = environment
-        endpoint = try DeliveryEndpoint(host: configuration.host, projectId: configuration.projectId, apiKey: configuration.apiKey)
+        endpoint = try DeliveryEndpoint(deliveryURL: configuration.deliveryURL, apiKey: configuration.apiKey)
         store = try Store(
             root: environment.root,
-            identifier: StoreIdentifier.make(host: configuration.host, projectId: configuration.projectId, apiKey: configuration.apiKey),
+            identifier: StoreIdentifier.make(deliveryURL: configuration.deliveryURL, apiKey: configuration.apiKey),
             sdkVersion: environment.sdkVersion)
         reporter = Reporter(store: store, handler: configuration.onReport)
         // Lookups mean the same before and after `start`: the snapshot is empty until the engine has built one.
@@ -283,17 +286,23 @@ final class Runtime: Sendable {
         // `ready` is idempotent; this covers a launch that ends without the engine reaching it.
         defer { parts.finishStart(); parts.readiness.open() }
         installMainBundleProxy()
-        let identifier = configuration.sendsInstallIdentifier ? await installIdentifier() : nil
+        var identifier: String? = nil
+        if configuration.sendsInstallIdentifier {
+            identifier = await installIdentifier()
+        } else {
+            await forgetInstallIdentifier()
+        }
         let identity = ClientIdentity(sdkVersion: environment.sdkVersion, appVersion: AppVersion.core(of: environment.appVersion),
                                       osVersion: environment.osVersion, language: environment.appLanguage(),
-                                      installIdentifier: identifier)
+                                      installIdentifier: identifier,
+                                      appBuild: environment.appBuild)
         // Reads the holder, not the runtime: a closure the engine keeps must not keep the runtime alive.
         let snapshots = self.snapshots
         let appLanguage = environment.appLanguage
         let store = self.store
         let client = DeliveryClient(endpoint: endpoint, identity: identity, transport: environment.transport,
                                     language: { Self.selectedLanguage(snapshots.current, appLanguage: appLanguage) },
-                                    releaseId: { snapshots.current.releaseId ?? 0 }, pollAfter: { store.lastPollAfter })
+                                    releaseId: { snapshots.current.releaseId ?? 0 })
         let parts = self.parts
         let engine = Engine(EngineEnvironment(
             store: store, client: client, snapshots: snapshots, preferences: environment.preferences,
@@ -320,14 +329,23 @@ final class Runtime: Sendable {
         _ = try? await store.cleanup()
     }
 
-    /// The identifier in state, else a new one saved there.
+    /// The identifier in state, else a new one saved there. A held value the SDK could not have made (a damaged or edited
+    /// file) is replaced, never sent; if the replacement cannot be saved nothing is sent.
     private func installIdentifier() async -> String? {
-        if let held = await store.state.installIdentifier { return held }
+        if let held = await store.state.installIdentifier, held.count <= 36, UUID(uuidString: held) != nil { return held }
         let created = UUID().uuidString
-        try? await store.update { state in
-            if state.installIdentifier == nil { state.installIdentifier = created }
+        do {
+            try await store.update { state in state.installIdentifier = created }
+        } catch {
+            return nil
         }
-        return await store.state.installIdentifier
+        return created
+    }
+
+    /// Turning the identifier off forgets it, so turning it on again starts a new one.
+    private func forgetInstallIdentifier() async {
+        guard await store.state.installIdentifier != nil else { return }
+        try? await store.update { state in state.installIdentifier = nil }
     }
 
     private func reportRevert(of engine: Engine) async {

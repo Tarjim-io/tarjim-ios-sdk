@@ -51,7 +51,7 @@ public enum Tarjim {
     /// through Tarjim, then waits up to about a second while the stored release is loaded, so the first lookup already
     /// serves it and a release downloaded earlier is shown from the first screen; past that, lookups catch up in the
     /// background. Nothing waits for the network. Called off the main thread it returns at once, and the main bundle
-    /// is routed through Tarjim in the background. A second call is ignored. An invalid `host` is a programmer error:
+    /// is routed through Tarjim in the background. A second call is ignored. An invalid `deliveryURL` is a programmer error:
     /// it stops a debug build with an assertion and is ignored in a release build.
     public static func start(_ configuration: TarjimConfiguration) {
         guard box.current == nil else { return }
@@ -68,8 +68,8 @@ public enum Tarjim {
         } catch {
             let message = "Tarjim.start ignored: \(error)"
             Log.debug(message)
-            if error as? DeliveryEndpoint.Error == .invalidHost {
-                assertionFailure("Tarjim.start ignored: the host is not a valid server address")
+            if error as? DeliveryEndpoint.Error == .invalidDeliveryURL {
+                assertionFailure("Tarjim.start ignored: the delivery URL is not valid")
             }
             return
         }
@@ -169,8 +169,8 @@ public enum Tarjim {
                 guard seconds.isFinite, seconds > 0 else { return }
                 try? await Task.sleep(nanoseconds: UInt64(min(seconds, 86_400) * 1_000_000_000))
             },
-            sdkVersion: "0.1.0", appVersion: info?["CFBundleShortVersionString"] as? String ?? "0",
-            osVersion: "\(version.majorVersion).\(version.minorVersion)")
+            sdkVersion: "0.1.0", appVersion: info?["CFBundleShortVersionString"] as? String,
+            osVersion: "\(version.majorVersion).\(version.minorVersion)", appBuild: info?["CFBundleVersion"] as? String)
     }
 
     /// Not in the background; read on the main actor, which `start` never blocks on.
@@ -218,12 +218,11 @@ public enum TarjimCheckResult: Equatable, Sendable {
 }
 
 public struct TarjimConfiguration: Sendable {
-    /// The Tarjim project whose released translations are downloaded.
-    public var projectId: Int
-    /// The project's API key. It is sent only in a request header, and only to `host`.
+    /// The delivery URL, copied from the Tarjim console. It is requested as given: `https`, or `http` only for
+    /// `localhost`, `127.0.0.1` or `::1`, with a path and no trailing slash, query, fragment or credentials.
+    public var deliveryURL: URL
+    /// The project's API key. It is sent only in a request header, and only to `deliveryURL`'s host.
     public var apiKey: String
-    /// The Tarjim delivery server, an `https` address such as `https://example.com`.
-    public var host: URL
     /// The bundle a lookup without `bundle:` reads. Required, so a bundle added to the release later never changes
     /// what an existing lookup means.
     public var defaultBundle: TarjimBundle
@@ -232,16 +231,15 @@ public struct TarjimConfiguration: Sendable {
     /// Called once per condition worth knowing about, on a background thread; nothing is sent anywhere. A condition
     /// that goes away and returns is called again.
     public var onReport: (@Sendable (TarjimReport) -> Void)?
-    /// Off by default. Turning it on sends a random identifier with update checks so active installs can be counted.
-    /// It is a UUID the SDK stores itself: a reinstall and a change of API key each get a new one.
-    public var sendsInstallIdentifier: Bool = false
+    /// On by default; set to `false` to send none. A random identifier goes with update checks so active installs can
+    /// be counted. It is a UUID the SDK stores itself: a reinstall and a change of API key each get a new one.
+    public var sendsInstallIdentifier: Bool = true
     /// Routes `NSLocalizedString`, storyboards and SwiftUI `Text` in the main bundle through Tarjim.
     public var interceptsMainBundle: Bool = true
 
-    public init(projectId: Int, apiKey: String, host: URL, defaultBundle: TarjimBundle, fallbackLanguage: String) {
-        self.projectId = projectId
+    public init(deliveryURL: URL, apiKey: String, defaultBundle: TarjimBundle, fallbackLanguage: String) {
+        self.deliveryURL = deliveryURL
         self.apiKey = apiKey
-        self.host = host
         self.defaultBundle = defaultBundle
         self.fallbackLanguage = fallbackLanguage
     }
@@ -250,7 +248,7 @@ public struct TarjimConfiguration: Sendable {
 /// The key is never shown, whichever way the configuration is printed.
 extension TarjimConfiguration: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var description: String {
-        "TarjimConfiguration(projectId: \(projectId), apiKey: <redacted>, host: \(host), defaultBundle: \(defaultBundle), "
+        "TarjimConfiguration(deliveryURL: \(deliveryURL), apiKey: <redacted>, defaultBundle: \(defaultBundle), "
             + "fallbackLanguage: \(fallbackLanguage))"
     }
 
@@ -258,7 +256,7 @@ extension TarjimConfiguration: CustomStringConvertible, CustomDebugStringConvert
 
     public var customMirror: Mirror {
         Mirror(self, children: [
-            "projectId": projectId, "apiKey": "<redacted>", "host": host, "defaultBundle": defaultBundle,
+            "deliveryURL": deliveryURL, "apiKey": "<redacted>", "defaultBundle": defaultBundle,
             "fallbackLanguage": fallbackLanguage, "sendsInstallIdentifier": sendsInstallIdentifier,
             "interceptsMainBundle": interceptsMainBundle,
         ])

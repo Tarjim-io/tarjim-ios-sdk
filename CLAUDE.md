@@ -22,7 +22,7 @@ a Swift 6.0+ toolchain (Xcode 16+) and Swift 6 language mode. MIT licensed. Vers
   - `Delivery/` is the network layer: `DeliveryClient` (meta, manifest and object requests, both delivery modes,
     every answer a typed outcome), `Verifier` (SHA-256), `URLSessionTransport` (one ephemeral session, no cache, no
     cookies, redirects refused).
-  - `Store/` is the only code that writes files: one store per (host, project, key) under Application Support,
+  - `Store/` is the only code that writes files: one store per (delivery URL, key) under Application Support,
     verified objects staged by hash, immutable install directories, `state.json` replaced atomically, cleanup of
     whatever nothing names. The SDK keeps exactly one `Store` per root.
   - `Update/` decides when to read `meta` (pollAfter as a minimum, jitter, backoff, Retry-After) and runs the cycle:

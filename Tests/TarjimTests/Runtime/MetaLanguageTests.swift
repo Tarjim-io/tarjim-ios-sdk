@@ -2,16 +2,15 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// The `User-Agent` names the language selected for Tarjim text (what `locale` reports), read for each request; it can
+/// The `meta` query names the language selected for Tarjim text (what `locale` reports), read for each request; it can
 /// name a language whose files are still downloading.
-final class UserAgentLanguageTests: XCTestCase {
+final class MetaLanguageTests: XCTestCase {
     private func language(of request: URLRequest?) -> String? {
-        guard let agent = request?.value(forHTTPHeaderField: "User-Agent") else { return nil }
-        return agent.split(separator: " ").first { $0.hasPrefix("lang/") }.map { String($0.dropFirst(5)) }
+        MetaRequest.query(request)["language"]
     }
 
     /// Nothing served yet: the app's language. Then the release's fallback, which is what is served to a French user.
-    func testTheUserAgentCarriesTheServedLanguage() async throws {
+    func testTheQueryCarriesTheServedLanguage() async throws {
         let harness = try RuntimeHarness(self)
         harness.appLanguage.value = "fr"
         harness.server.publish(try Release.one())
@@ -26,7 +25,7 @@ final class UserAgentLanguageTests: XCTestCase {
         XCTAssertEqual(language(of: harness.server.metaRequests.last), "en")
     }
 
-    func testTheUserAgentFollowsTheLanguageTheAppChooses() async throws {
+    func testTheQueryFollowsTheLanguageTheAppChooses() async throws {
         let harness = try RuntimeHarness(self)
         harness.server.publish(try Release.one())
         let runtime = try harness.make()

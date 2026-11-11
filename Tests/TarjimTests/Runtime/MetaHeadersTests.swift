@@ -2,28 +2,32 @@ import Foundation
 import XCTest
 @testable import Tarjim
 
-/// What an update check says about the app: the app-version header on `meta`, and the release and interval in force.
+/// What an update check says about the app, in the `meta` query: its version and the release it shows.
 final class MetaHeadersTests: XCTestCase {
+    /// The old token names, mapped to the query parameters that now carry them.
     private func token(_ name: String, of request: URLRequest?) -> String? {
-        request?.value(forHTTPHeaderField: "User-Agent")?.split(separator: " ")
-            .first { $0.hasPrefix("\(name)/") }.map { String($0.dropFirst(name.count + 1)) }
+        let parameter = ["app": "appVersion", "rel": "release", "lang": "language",
+                         "install": "installId", "ios": "osVersion"][name] ?? name
+        return MetaRequest.query(request)[parameter]
     }
 
-    func testMetaCarriesTheAppVersionCore() async throws {
+    func testMetaCarriesTheAppVersionCoreInItsQueryOnly() async throws {
         let harness = try RuntimeHarness(self)
         harness.server.publish(try Release.one())
         let runtime = try harness.make()
         await runtime.start(foreground: true)
         await runtime.checkNow()
         let meta = try XCTUnwrap(harness.server.metaRequests.first)
-        XCTAssertEqual(meta.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "2.3.1")
         XCTAssertEqual(token("app", of: meta), "2.3.1")
+        XCTAssertNil(meta.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "the version travels in the query, not a header")
+        XCTAssertEqual(meta.value(forHTTPHeaderField: "User-Agent"), "Tarjim-iOS/0.1.0")
         for other in harness.server.requests where !other.url!.path.hasSuffix("/delivery/meta") {
+            XCTAssertNil(MetaRequest.query(other)["appVersion"], "\(other.url!)")
             XCTAssertNil(other.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "\(other.url!)")
         }
     }
 
-    func testAFreshInstallSaysReleaseZeroAndPollZero() async throws {
+    func testAFreshInstallSaysReleaseZero() async throws {
         let harness = try RuntimeHarness(self)
         harness.server.publish(try Release.one())
         let runtime = try harness.make()
@@ -31,11 +35,11 @@ final class MetaHeadersTests: XCTestCase {
         await runtime.checkNow()
         let first = harness.server.metaRequests.first
         XCTAssertEqual(token("rel", of: first), "0")
-        XCTAssertEqual(token("poll", of: first), "0")
+        XCTAssertNil(MetaRequest.query(first)["pollSeconds"])
     }
 
-    /// The release shown and the interval obeyed: a downloaded release waiting to be shown is not the one named.
-    func testLaterChecksNameTheShownReleaseAndTheIntervalObeyed() async throws {
+    /// The release shown: a downloaded release waiting to be shown is not the one named.
+    func testLaterChecksNameTheShownRelease() async throws {
         let harness = try RuntimeHarness(self)
         harness.server.publish(try Release.one())
         let runtime = try harness.make()
@@ -45,7 +49,6 @@ final class MetaHeadersTests: XCTestCase {
         harness.clock.advance(3600)
         await runtime.checkNow()
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.last), "42")
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "1800")
         harness.clock.advance(3600)
         harness.server.resetRequests()
         await runtime.checkNow()
@@ -56,77 +59,40 @@ final class MetaHeadersTests: XCTestCase {
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.last), "43")
     }
 
-    /// `poll/` is the interval in force after the SDK's clamp, never the raw value and never a backoff wait.
-    func testPollIsTheClampedIntervalNotABackoff() async throws {
+    func testTheInstallIdentifierIsOnUnlessTheAppTurnsItOff() async throws {
+        let configuration = TarjimConfiguration(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: "k",
+                                                defaultBundle: .namespace("default"), fallbackLanguage: "en")
+        XCTAssertTrue(configuration.sendsInstallIdentifier)
+    }
+
+    // MARK: Every path that sets the release
+
+    /// There is no polling interval any more, so none is reported: not after a full answer, an error that names one,
+    /// an unreleased stage, a backoff, or a relaunch that reads an interval stored by an earlier version.
+    func testNoIntervalIsSentOnAnyPath() async throws {
         let harness = try RuntimeHarness(self)
-        let release = try Release.one().changing(releaseId: 42, fields: [:])
+        let release = try Release.one()
         harness.server.publish(release)
         harness.server.answerMeta(release.metaAnswer(pollAfter: 5))
         let runtime = try harness.make()
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        harness.server.answerMeta(CycleFixtures.problem(503, code: "unavailable"))
-        harness.clock.advance(120)
-        await runtime.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "60")
-        harness.server.publish(release)
-        harness.clock.advance(3600)
-        await runtime.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "60", "the obeyed interval, not the backoff")
-    }
-
-    func testTheInstallIdentifierIsOffUnlessTheAppTurnsItOn() async throws {
-        let configuration = TarjimConfiguration(projectId: 1, apiKey: "k", host: URL(string: "https://example.invalid")!,
-                                                defaultBundle: .namespace("default"), fallbackLanguage: "en")
-        XCTAssertFalse(configuration.sendsInstallIdentifier)
-    }
-
-    // MARK: Every path that sets the interval or the release
-
-    /// The interval in force is the one the last answer set, whatever kind of answer it was.
-    func testPollFollowsTheIntervalAConfigurationErrorSets() async throws {
-        let harness = try RuntimeHarness(self)
-        harness.server.publish(try Release.one())
-        let runtime = try harness.make()
-        await runtime.start(foreground: true)
-        await runtime.checkNow()
-        harness.server.answerMeta(CycleFixtures.problem(403, code: "delivery.key_revoked", pollAfter: 600))
-        harness.clock.advance(3600)
-        await runtime.checkNow()
-        harness.server.publish(try Release.one())
-        harness.clock.advance(700)
-        await runtime.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "600")
-    }
-
-    func testPollFollowsTheIntervalWhileNothingIsReleased() async throws {
-        let harness = try RuntimeHarness(self)
-        harness.server.answerMeta(CycleFixtures.problem(404, code: "delivery.stage_unreleased"))
-        let runtime = try harness.make()
-        await runtime.start(foreground: true)
-        await runtime.checkNow()
-        harness.clock.advance(61)
-        await runtime.checkNow()
-        XCTAssertEqual(harness.server.metaRequests.count, 2)
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "60")
-    }
-
-    /// A backoff of 60 s after a 503 is not the 600 s interval in force.
-    func testPollIsNeverTheBackoffWait() async throws {
-        let harness = try RuntimeHarness(self)
-        let release = try Release.one()
-        harness.server.publish(release)
-        harness.server.answerMeta(release.metaAnswer(pollAfter: 600))
-        let runtime = try harness.make()
-        await runtime.start(foreground: true)
-        await runtime.checkNow()
-        harness.server.answerMeta(CycleFixtures.problem(503, code: "unavailable"))
-        harness.clock.advance(700)
-        await runtime.checkNow()
-        harness.server.answerMeta(release.metaAnswer(pollAfter: 600))
-        harness.clock.advance(61)
-        await runtime.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.last), "600")
+        for answer in [release.metaAnswer(pollAfter: 600), CycleFixtures.problem(403, code: "delivery.key_revoked", pollAfter: 600),
+                       CycleFixtures.problem(404, code: "delivery.stage_unreleased"), CycleFixtures.problem(503, code: "unavailable"),
+                       release.metaAnswer(pollAfter: 900)] {
+            harness.server.answerMeta(answer)
+            harness.clock.advance(100_000)
+            await runtime.checkNow()
+        }
+        harness.clock.advance(100_000)
+        let next = try harness.make()
+        await next.start(foreground: true)
+        await next.checkNow()
+        XCTAssertEqual(harness.server.metaRequests.count, 7, "one after each answer, and the relaunch")
+        for request in harness.server.requests {
+            XCTAssertNil(MetaRequest.query(request)["pollSeconds"], "\(request.url!)")
+            XCTAssertFalse(request.url?.query?.contains("poll") ?? false, "\(request.url!)")
+        }
     }
 
     func testARelaunchSendsWhatItLastKnew() async throws {
@@ -144,7 +110,7 @@ final class MetaHeadersTests: XCTestCase {
         let second = try harness.make()
         await second.start(foreground: true)
         await second.checkNow()
-        XCTAssertEqual(token("poll", of: harness.server.metaRequests.first), "900")
+        XCTAssertNil(MetaRequest.query(harness.server.metaRequests.first)["pollSeconds"])
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.first), "42")
     }
 
@@ -190,7 +156,7 @@ final class MetaHeadersTests: XCTestCase {
         XCTAssertEqual(token("rel", of: harness.server.metaRequests.first), "42")
     }
 
-    /// The app's own version string, reduced on the way out: the header the server rejects otherwise.
+    /// The app's own version string, reduced on the way out: the server rejects a `meta` without a well-formed one.
     func testTheBundleVersionIsReducedBeforeItIsSent() async throws {
         let harness = try RuntimeHarness(self)
         harness.rawAppVersion = "2.1 beta (77)"
@@ -198,7 +164,6 @@ final class MetaHeadersTests: XCTestCase {
         let runtime = try harness.make()
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        XCTAssertEqual(harness.server.metaRequests.first?.value(forHTTPHeaderField: "X-Tarjim-App-Version"), "2.1.0")
         XCTAssertEqual(token("app", of: harness.server.metaRequests.first), "2.1.0")
     }
 }

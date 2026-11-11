@@ -101,20 +101,23 @@ final class StoreStateTests: XCTestCase {
     }
 }
 
+/// One store per delivery URL and key: another stage, tenant or key never reads the old one's files.
 final class StoreIdentifierTests: XCTestCase {
-    private let host = URL(string: "https://api.example.invalid")!
+    private let url = URL(string: "https://api.example.invalid/t/7/projects/1/delivery/meta")!
 
-    func testDiffersByKeyHostAndProjectAndIsStable() {
-        let base = StoreIdentifier.make(host: host, projectId: 1, apiKey: "key-a")
-        XCTAssertEqual(base, StoreIdentifier.make(host: host, projectId: 1, apiKey: "key-a"))
-        XCTAssertNotEqual(base, StoreIdentifier.make(host: host, projectId: 1, apiKey: "key-b"))
-        XCTAssertNotEqual(base, StoreIdentifier.make(host: host, projectId: 2, apiKey: "key-a"))
-        XCTAssertNotEqual(base, StoreIdentifier.make(host: URL(string: "https://other.example.invalid")!, projectId: 1, apiKey: "key-a"))
+    func testDiffersByKeyAndDeliveryURLAndIsStable() {
+        let base = StoreIdentifier.make(deliveryURL: url, apiKey: "key-a")
+        XCTAssertEqual(base, StoreIdentifier.make(deliveryURL: url, apiKey: "key-a"))
+        XCTAssertNotEqual(base, StoreIdentifier.make(deliveryURL: url, apiKey: "key-b"))
+        XCTAssertNotEqual(base, StoreIdentifier.make(deliveryURL: URL(string: "https://api.example.invalid/t/8/projects/1/delivery/meta")!,
+                                                     apiKey: "key-a"))
+        XCTAssertNotEqual(base, StoreIdentifier.make(deliveryURL: URL(string: "https://other.example.invalid/t/7/projects/1/delivery/meta")!,
+                                                     apiKey: "key-a"))
     }
 
     /// It names a directory, so it must be a safe path component that does not reveal the key.
     func testIsThirtyTwoLowercaseHexCharactersWithoutTheKey() {
-        let id = StoreIdentifier.make(host: host, projectId: 1, apiKey: "secret-key")
+        let id = StoreIdentifier.make(deliveryURL: url, apiKey: "secret-key")
         XCTAssertEqual(id.count, 32)
         XCTAssertTrue(id.allSatisfy { "0123456789abcdef".contains($0) }, id)
         XCTAssertFalse(id.contains("secret"))

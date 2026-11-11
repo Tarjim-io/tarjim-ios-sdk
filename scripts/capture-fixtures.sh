@@ -8,14 +8,15 @@
 #/   written to disk or passed on a command line.
 #/
 #/ USAGE:
-#/   TARJIM_APIKEY=... capture-fixtures.sh --host <url> --project <id> --out <dir> [--api-version <v>] [--app-version <v>] [--help]
+#/   TARJIM_APIKEY=... capture-fixtures.sh --delivery-url <meta URL> --out <dir> [--api-version <v>] [--app-version <v>] [--help]
 #/
 #/ SYNOPSIS:
-#/   --host: API base URL: https://<host>[:port][/path], or http://localhost|127.0.0.1[:port][/path]
-#/   --project: numeric project id
+#/   --delivery-url: the delivery URL from the console, requested as given for meta: https://<host>[:port]/<path>,
+#/     or http://localhost|127.0.0.1|[::1][:port]/<path>; no dot segments, whitespace,
+#/     trailing slash, query or fragment
 #/   --out: recording directory to create; must not exist
 #/   --api-version: value for X-Tarjim-Api-Version (default: 2026-07-29)
-#/   --app-version: value for X-Tarjim-App-Version on meta requests, MAJOR.MINOR.PATCH (default: 0.0.0)
+#/   --app-version: sent as the appVersion query parameter on meta requests, MAJOR.MINOR.PATCH (default: 0.0.0)
 #/   --help: Prints this message
 #/
 #/ Afterwards move the directory to Tests/TarjimTests/Fixtures/recorded/<name>/ and run
@@ -46,28 +47,19 @@ fail() {
 need curl
 need jq
 
-host=""
-project=""
+delivery_url=""
 out=""
 api_version="2026-07-29"
 app_version="0.0.0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --host)
-      host="${2:?--host requires a value}"
+    --delivery-url)
+      delivery_url="${2:?--delivery-url requires a value}"
       shift 2
       ;;
-    --host=*)
-      host="${1#*=}"
-      shift
-      ;;
-    --project)
-      project="${2:?--project requires a value}"
-      shift 2
-      ;;
-    --project=*)
-      project="${1#*=}"
+    --delivery-url=*)
+      delivery_url="${1#*=}"
       shift
       ;;
     --out)
@@ -104,8 +96,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$host" || -z "$project" || -z "$out" ]]; then
-  echo "[ERROR] --host, --project and --out are required" >&2
+if [[ -z "$delivery_url" || -z "$out" ]]; then
+  echo "[ERROR] --delivery-url and --out are required" >&2
   usage
 fi
 
@@ -113,16 +105,15 @@ if [[ -z "${TARJIM_APIKEY:-}" ]]; then
   fail "TARJIM_APIKEY is not set"
 fi
 
-host="${host%/}"
-# No userinfo, query or fragment: the key must go to the host the operator typed.
-host_re='^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~-]+)*$'
-local_re='^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/[A-Za-z0-9._~-]+)*$'
-if [[ ! "$host" =~ $host_re && ! "$host" =~ $local_re ]]; then
-  fail "--host must be https://<host>[:port][/path] (http only for localhost and 127.0.0.1)"
+# No userinfo, query, fragment or trailing slash: the key must go to the host the operator typed.
+https_re='^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~-]+)+$'
+local_re='^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/[A-Za-z0-9._~-]+)+$'
+if [[ ! "$delivery_url" =~ $https_re && ! "$delivery_url" =~ $local_re ]]; then
+  fail "--delivery-url must be https://<host>[:port]/<path> (http only for localhost, 127.0.0.1 and [::1]), without a trailing slash"
 fi
-
-if [[ ! "$project" =~ ^[0-9]+$ ]]; then
-  fail "--project must be a number"
+# The character class allows dots, so "." and ".." segments are refused separately, as the SDK does.
+if [[ "$delivery_url" =~ /\.\.?(/|$) ]]; then
+  fail "--delivery-url must not contain \".\" or \"..\" path segments"
 fi
 
 # The server's grammar: no leading zeros, at most 32 characters.
@@ -158,17 +149,16 @@ bad_key_headers="$work/badkey.hdr"
 bad_key_meta_headers="$work/badkey-meta.hdr"
 printf 'X-Tarjim-Apikey: %s\nX-Tarjim-Api-Version: %s\n' "$TARJIM_APIKEY" "$api_version" >"$key_headers"
 printf 'X-Tarjim-Apikey: tarjim-0-0-0-invalid\nX-Tarjim-Api-Version: %s\n' "$api_version" >"$bad_key_headers"
-# The server rejects a meta request without it; the SDK sends it on meta only, so the other requests don't.
-app_header="$(printf 'X-Tarjim-App-Version: %s' "$app_version")"
-{ cat "$key_headers"; echo "$app_header"; } >"$meta_headers"
-{ cat "$bad_key_headers"; echo "$app_header"; } >"$bad_key_meta_headers"
+cp "$key_headers" "$meta_headers"
+cp "$bad_key_headers" "$bad_key_meta_headers"
 umask 022
 
 stage="$work/stage"
 mkdir -p "$stage/objects" "$stage/errors"
 recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-url_re='^[A-Za-z0-9._~:/?&=%+,-]+$'
+# Brackets: an IPv6 loopback host.
+url_re='^[][A-Za-z0-9._~:/?&=%+,-]+$'
 
 # fetch <url> <body-file> <headers-dump-file> [header-file]  -> prints the HTTP status
 fetch() {
@@ -178,7 +168,7 @@ fetch() {
   cfg="$(mktemp "$work/curl.XXXXXX")"
   printf 'url = "%s"\n' "$url" >"$cfg"
   # -q first: a ~/.curlrc must not add options. No redirects are followed, so the key stays on one host.
-  local args=(-q -sS --compressed --max-time 60 -D "$dump" -o "$body" -w '%{http_code}' -K "$cfg")
+  local args=(-q -sS --globoff --compressed --max-time 60 -D "$dump" -o "$body" -w '%{http_code}' -K "$cfg")
   if [[ -n "$hdr" ]]; then
     args+=(-H "@$hdr")
   fi
@@ -202,9 +192,12 @@ write_envelope() {
     '{provenance: "recorded", recordedAt: $at, status: $status, headers: $headers, body: $body}' >"$dest"
 }
 
-meta_url="$host/projects/$project/delivery/meta"
+# The server rejects a meta request without these; only meta carries them, so the later URLs are built from the
+# delivery URL without them. The version is already validated as digits and dots.
+meta_url="$delivery_url"
+meta_request_url="$delivery_url?appVersion=$app_version&platform=ios"
 
-status="$(fetch "$meta_url" "$work/meta.body" "$work/meta.hdr" "$meta_headers")"
+status="$(fetch "$meta_request_url" "$work/meta.body" "$work/meta.hdr" "$meta_headers")"
 if [[ "$status" != "200" ]]; then
   fail "meta answered $status, expected 200"
 fi
@@ -279,7 +272,7 @@ jq -ec '
 ' <"$work/meta.body" | tr -d '\n' >"$work/meta.redacted"
 write_envelope 200 "$work/meta.hdr" "$work/meta.redacted" "$stage/meta.$mode.json"
 
-status="$(fetch "$meta_url" "$work/e401.body" "$work/e401.hdr" "$bad_key_meta_headers")"
+status="$(fetch "$meta_request_url" "$work/e401.body" "$work/e401.hdr" "$bad_key_meta_headers")"
 if [[ "$status" != "401" ]]; then
   fail "meta with an invalid key answered $status, expected 401"
 fi
@@ -289,6 +282,6 @@ mkdir -p "$(dirname "$out")"
 mv "$stage" "$out"
 chmod 755 "$out"
 
-echo "Recorded $mode-mode release for project $project into $out:"
+echo "Recorded $mode-mode release into $out:"
 echo "  meta.$mode.json, manifest.json, $object_count objects, errors/meta-401-unauthorized.json"
 echo "Move it to Tests/TarjimTests/Fixtures/recorded/<name>/ and run 'swift test --parallel' (the leak scan) before committing. Nothing was staged in git."
