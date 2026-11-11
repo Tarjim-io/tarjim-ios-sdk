@@ -1,7 +1,7 @@
 import Foundation
 
-/// `meta`, manifest and object requests over an injected transport. Holds no clock or file system, and no state
-/// beyond whether a server has refused a check for want of a version. Every answer is a typed outcome; nothing here throws.
+/// `meta`, manifest and object requests over an injected transport. Holds no state of its own, and no clock
+/// or file system. Every answer is a typed outcome; nothing here throws.
 struct DeliveryClient: Sendable {
     let endpoint: DeliveryEndpoint
     let identity: ClientIdentity
@@ -11,8 +11,6 @@ struct DeliveryClient: Sendable {
     let language: @Sendable () -> String
     /// Asked for at each request, like `language`: the release lookups read.
     let releaseId: @Sendable () -> Int
-    /// Shared by every copy of this client, as the cycle and the runtime each hold one.
-    private let versionRequired = Flag()
 
     init(endpoint: DeliveryEndpoint, identity: ClientIdentity, transport: any Transport, apiVersion: String = "2026-07-29",
          language: (@Sendable () -> String)? = nil, releaseId: (@Sendable () -> Int)? = nil) {
@@ -25,21 +23,8 @@ struct DeliveryClient: Sendable {
     }
 
     func fetchMeta(ifNoneMatch etag: String?) async -> MetaOutcome {
-        var identity = currentIdentity()
-        // A server that still requires a version would otherwise refuse an app that has none, so after its first
-        // refusal the app is served as the oldest one. Transitional: goes when no server requires a version.
-        if identity.appVersion == nil, versionRequired.isSet { identity.appVersion = "0.0.0" }
-        let first = await requestMeta(query: identity.metaQuery, ifNoneMatch: etag)
-        guard identity.appVersion == nil, first.status == 400, case .configurationError(code: "delivery.app_version_required", _) = first.outcome
-        else { return first.outcome }
-        versionRequired.set()
-        identity.appVersion = "0.0.0"
-        return await requestMeta(query: identity.metaQuery, ifNoneMatch: etag).outcome
-    }
-
-    private func requestMeta(query: String, ifNoneMatch etag: String?) async -> (outcome: MetaOutcome, status: Int?) {
         // The delivery URL never has a query of its own (validation refuses one), so the identity is the whole query.
-        guard let url = URL(string: endpoint.metaURL.absoluteString + "?" + query) else { return (.unreadable, nil) }
+        guard let url = URL(string: endpoint.metaURL.absoluteString + "?" + currentIdentity().metaQuery) else { return .unreadable }
         var request = URLRequest(url: url)
         applyIdentity(to: &request, withKey: true)
         if let etag {
@@ -50,10 +35,9 @@ struct DeliveryClient: Sendable {
         do {
             (data, response) = try await transport.send(request)
         } catch {
-            return (.networkFailure, nil)
+            return .networkFailure
         }
-        let retryAfter = Self.retryAfter(response)
-        return (Self.metaOutcome(data, response, retryAfter: retryAfter), response.statusCode)
+        return Self.metaOutcome(data, response, retryAfter: Self.retryAfter(response))
     }
 
     private static func metaOutcome(_ data: Data, _ response: HTTPURLResponse, retryAfter: Int?) -> MetaOutcome {
@@ -222,11 +206,3 @@ extension DeliveryClient: CustomReflectable {
     }
 }
 
-/// Never cleared: a relaunch makes a new client, which asks without a version again.
-private final class Flag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = false
-
-    var isSet: Bool { lock.withLock { value } }
-    func set() { lock.withLock { value = true } }
-}
