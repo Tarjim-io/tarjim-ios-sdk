@@ -179,10 +179,18 @@ the app's build number when it has one (`appBuild`) and the install identifier. 
 requests to your delivery host; downloads from the CDN carry no header of the SDK's own and the system's default
 `User-Agent` still goes out.
 
+The privacy manifest declares the app version, iOS version, build number and language as other diagnostic data: not
+linked to the user, not used for tracking, used to pick the release the app gets and to count usage. Declare them the
+same way in your App Store privacy answers.
+
 A random install identifier is sent by default so active installs can be counted. The privacy manifest declares it, and
 an app that ships the SDK must declare it in its App Store privacy answers (as a device ID) unless it sets
 `sendsInstallIdentifier = false`, which sends none and deletes any identifier already stored. The SDK creates it per
 install (new on reinstall and when the key changes).
+
+**Consent.** Where your users must agree before an identifier is stored on their device (in the EU, for example), set
+`sendsInstallIdentifier = false` until they agree, then set it to `true` from the next `start`. Until then the SDK
+stores and sends no identifier, and nothing else about updates changes.
 
 The language is the one `Tarjim.locale` reports, read at each check: the language chosen with `setLanguage` if the
 release has it, else the user's language if the release has it, else the fallback language. It can name a language whose
