@@ -73,7 +73,7 @@ final class URLSessionTransportTests: XCTestCase {
         let configuration = URLSessionTransport.makeConfiguration()
         configuration.protocolClasses = [RedirectStub.self]
         let transport = URLSessionTransport(configuration: configuration)
-        var request = URLRequest(url: URL(string: "https://api.example.invalid/projects/1/delivery/meta")!)
+        var request = URLRequest(url: URL(string: "https://api.example.invalid/t/7/projects/1/delivery/meta")!)
         request.setValue(DeliveryFixtures.apiKey, forHTTPHeaderField: "X-Tarjim-Apikey")
         let (_, response) = try await transport.send(request)
         XCTAssertEqual(response.statusCode, 302)

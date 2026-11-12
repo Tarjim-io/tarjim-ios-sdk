@@ -26,7 +26,7 @@ final class RuntimeLifecycleTests: XCTestCase {
             harness.clock.advance(3600)
         }
         XCTAssertEqual(harness.reports.value.map(\.kind), [])
-        let identifier = StoreIdentifier.make(host: DeliveryFixtures.host, projectId: DeliveryFixtures.projectId, apiKey: DeliveryFixtures.apiKey)
+        let identifier = StoreIdentifier.make(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: DeliveryFixtures.apiKey)
         let state = await (try StoreFixtures.store(harness.root, identifier: identifier)).state
         XCTAssertNotNil(state.active, "the release was installed by the schedule and stayed")
         XCTAssertEqual(state.badChecksums, [])
@@ -117,7 +117,7 @@ final class RuntimeLifecycleTests: XCTestCase {
         harness.instantSleeps.value = harness.sleeps.value.count + 1
         await runtime.checkNow()
         await EngineFixtures.settle()
-        let identifier = StoreIdentifier.make(host: DeliveryFixtures.host, projectId: DeliveryFixtures.projectId, apiKey: DeliveryFixtures.apiKey)
+        let identifier = StoreIdentifier.make(deliveryURL: DeliveryFixtures.deliveryURL, apiKey: DeliveryFixtures.apiKey)
         let state = await (try StoreFixtures.store(harness.root, identifier: identifier)).state
         XCTAssertNotNil(state.active)
         XCTAssertNil(state.probation, "the app stayed active long enough after the activation")

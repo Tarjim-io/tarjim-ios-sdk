@@ -223,10 +223,10 @@ final class Runtime: Sendable {
     init(configuration: TarjimConfiguration, environment: Environment) throws {
         self.configuration = configuration
         self.environment = environment
-        endpoint = try DeliveryEndpoint(host: configuration.host, projectId: configuration.projectId, apiKey: configuration.apiKey)
+        endpoint = try DeliveryEndpoint(deliveryURL: configuration.deliveryURL, apiKey: configuration.apiKey)
         store = try Store(
             root: environment.root,
-            identifier: StoreIdentifier.make(host: configuration.host, projectId: configuration.projectId, apiKey: configuration.apiKey),
+            identifier: StoreIdentifier.make(deliveryURL: configuration.deliveryURL, apiKey: configuration.apiKey),
             sdkVersion: environment.sdkVersion)
         reporter = Reporter(store: store, handler: configuration.onReport)
         // Lookups mean the same before and after `start`: the snapshot is empty until the engine has built one.

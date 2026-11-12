@@ -13,10 +13,13 @@ struct TarjimExampleApp: App {
         let model = UpdateModel()
         _model = StateObject(wrappedValue: model)
         let environment = ProcessInfo.processInfo.environment
+        let placeholder = URL(string: "https://tarjim.invalid/t/0/projects/0/delivery/meta")!
+        // A pasted value often carries a trailing newline, which `URL(string:)` would percent-encode into the path.
+        let deliveryURL = environment["TARJIM_EXAMPLE_DELIVERY_URL"]
+            .flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? placeholder
         Tarjim.start(TarjimConfiguration(
-            projectId: Int(environment["TARJIM_EXAMPLE_PROJECT_ID"] ?? "") ?? 0,
+            deliveryURL: deliveryURL,
             apiKey: environment["TARJIM_EXAMPLE_API_KEY"] ?? "YOUR_API_KEY",
-            host: URL(string: environment["TARJIM_EXAMPLE_HOST"] ?? "https://tarjim.invalid")!,
             defaultBundle: .namespace("app"),
             fallbackLanguage: "en"))
     }

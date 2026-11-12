@@ -3,43 +3,113 @@ import XCTest
 @testable import Tarjim
 
 final class DeliveryEndpointTests: XCTestCase {
-    func testMetaURLIsHostProjectsIdDeliveryMetaWithoutTrailingSlash() throws {
-        let endpoint = try DeliveryEndpoint(host: URL(string: "https://api.example.invalid")!, projectId: 7, apiKey: "k")
-        XCTAssertEqual(endpoint.metaURL.absoluteString, "https://api.example.invalid/projects/7/delivery/meta")
+    private let deliveryURL = URL(string: "https://api.example.invalid/t/7/projects/1/delivery/meta")!
+
+    /// The delivery URL the console shows is the `meta` URL itself; the SDK sends it as given.
+    func testTheDeliveryURLIsTheMetaURLAsGiven() throws {
+        let endpoint = try DeliveryEndpoint(deliveryURL: deliveryURL, apiKey: "k")
+        XCTAssertEqual(endpoint.metaURL, deliveryURL)
+        XCTAssertEqual(endpoint.apiKey, "k")
     }
 
-    /// Plain `http` would put the key on the wire in the clear; it is allowed for a local stack only.
-    func testHostPortIsKeptAndHTTPIsAllowedForLoopbackOnly() throws {
-        let endpoint = try DeliveryEndpoint(host: URL(string: "http://localhost:8080")!, projectId: 7, apiKey: "k")
-        XCTAssertEqual(endpoint.metaURL.absoluteString, "http://localhost:8080/projects/7/delivery/meta")
-        XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "http://127.0.0.1:3000")!, projectId: 7, apiKey: "k"))
-        XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "http://[::1]:3000")!, projectId: 7, apiKey: "k"))
-        XCTAssertNoThrow(try DeliveryEndpoint(host: URL(string: "https://api.example.invalid:8443")!, projectId: 7, apiKey: "k"))
-    }
-
-    /// A trailing slash on the host is harmless; the meta URL still has none (the CDN answers 403
-    /// to `…/meta/`, and origin-relative URLs would resolve against the wrong segment).
-    func testTrailingSlashOnHostIsNormalised() throws {
-        let plain = try DeliveryEndpoint(host: URL(string: "https://api.example.invalid")!, projectId: 1, apiKey: "k")
-        let slashed = try DeliveryEndpoint(host: URL(string: "https://api.example.invalid/")!, projectId: 1, apiKey: "k")
-        XCTAssertEqual(slashed.metaURL, plain.metaURL)
-        XCTAssertFalse(slashed.metaURL.absoluteString.hasSuffix("/"))
-    }
-
-    func testHostWithPathQueryFragmentOrOtherSchemeIsRefused() {
-        for bad in ["https://api.example.invalid/api", "https://api.example.invalid/?x=1", "https://api.example.invalid#f",
-                    "ftp://api.example.invalid", "api.example.invalid", "https://", "http://api.example.invalid",
-                    "https://user@api.example.invalid"] {
-            XCTAssertThrowsError(try DeliveryEndpoint(host: URL(string: bad) ?? URL(string: "file:///")!, projectId: 1, apiKey: "k"), bad) {
-                XCTAssertEqual($0 as? DeliveryEndpoint.Error, .invalidHost, bad)
-            }
+    /// The path is the server's business: any path is taken as it is, never parsed or rebuilt.
+    func testAnyPathIsTakenAsItIs() throws {
+        for path in ["/t/7/projects/1/delivery/meta", "/projects/1/delivery/meta", "/a/b/c", "/meta"] {
+            let url = URL(string: "https://cdn.example.invalid\(path)")!
+            XCTAssertEqual(try DeliveryEndpoint(deliveryURL: url, apiKey: "k").metaURL, url, path)
         }
     }
 
-    func testStoresProjectAndKey() throws {
-        let endpoint = try DeliveryFixtures.endpoint()
-        XCTAssertEqual(endpoint.projectId, DeliveryFixtures.projectId)
-        XCTAssertEqual(endpoint.apiKey, DeliveryFixtures.apiKey)
+    /// Plain `http` would put the key on the wire in the clear; it is allowed for a local stack only.
+    func testHTTPIsAllowedForLoopbackOnlyAndPortsAreKept() throws {
+        for good in ["http://localhost:8080/t/1/projects/1/delivery/meta", "http://127.0.0.1:3000/x/meta",
+                     "http://[::1]:3000/x/meta", "https://api.example.invalid:8443/t/1/projects/1/delivery/meta"] {
+            let url = URL(string: good)!
+            XCTAssertEqual(try DeliveryEndpoint(deliveryURL: url, apiKey: "k").metaURL, url, good)
+        }
+    }
+
+    /// A trailing slash would make origin-relative references resolve against the wrong segment; a query, fragment
+    /// or credentials have no place in it.
+    func testADeliveryURLThatIsNotAMetaURLIsRefused() {
+        for bad in ["https://api.example.invalid/t/7/projects/1/delivery/meta/", "https://api.example.invalid",
+                    "https://api.example.invalid/", "https://api.example.invalid/t/7/projects/1/delivery/meta?x=1",
+                    "https://api.example.invalid/t/7/projects/1/delivery/meta#f", "https://user@api.example.invalid/x/meta",
+                    "https://user:pw@api.example.invalid/x/meta", "http://api.example.invalid/x/meta", "ftp://api.example.invalid/x/meta",
+                    "api.example.invalid/x/meta", "https:///x/meta"] {
+            XCTAssertThrowsError(try DeliveryEndpoint(deliveryURL: URL(string: bad) ?? URL(string: "file:///")!, apiKey: "k"), bad) {
+                XCTAssertEqual($0 as? DeliveryEndpoint.Error, .invalidDeliveryURL, bad)
+            }
+        }
+    }
+}
+
+/// The edges a pasted or hand-typed delivery URL can have.
+final class DeliveryURLEdgeTests: XCTestCase {
+    private func refused(_ string: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let url = URL(string: string) else { return XCTFail("\(string) does not parse", file: file, line: line) }
+        XCTAssertThrowsError(try DeliveryEndpoint(deliveryURL: url, apiKey: "k"), string, file: file, line: line) {
+            XCTAssertEqual($0 as? DeliveryEndpoint.Error, .invalidDeliveryURL, string, file: file, line: line)
+        }
+    }
+
+    /// Dot segments make the request path and the base for origin references disagree.
+    func testDotSegmentsAreRefused() {
+        for path in ["/t/7/projects/1/delivery/meta/.", "/t/7/projects/1/delivery/meta/..", "/t/7/../projects/1/delivery/meta",
+                     "/t/7/./projects/1/delivery/meta", "/t/7/%2e%2e/projects/1/delivery/meta", "/t/7/projects/1/delivery/meta/%2E"] {
+            refused("https://api.example.invalid\(path)")
+        }
+    }
+
+    /// Whitespace or control characters, encoded or not, mean a bad paste, not a URL the server serves.
+    func testWhitespaceIsRefused() {
+        for bad in ["https://api.example.invalid/t/7/projects/1/delivery/meta%20", "https://api.example.invalid/t/7/projects/1/delivery/meta%0A",
+                    "https://api.example.invalid/t/7/projects%091/delivery/meta"] {
+            refused(bad)
+        }
+    }
+
+    func testControlAndInvisibleCharactersAreRefused() {
+        for bad in ["https://api.example.invalid/t/7/projects/1/delivery/meta%00", "https://api.example.invalid/t/7/projects/1/delivery/meta%7F",
+                    "https://api.example.invalid/t/7/projects/1/delivery/meta%E2%80%8B"] {
+            refused(bad)
+        }
+    }
+
+    /// An internationalised host in the ASCII form a console shows is an ordinary host.
+    func testAPunycodeHostIsAccepted() throws {
+        let url = URL(string: "https://xn--bcher-kva.example.invalid/t/7/projects/1/delivery/meta")!
+        XCTAssertEqual(try DeliveryEndpoint(deliveryURL: url, apiKey: "k").metaURL, url)
+    }
+
+    /// Plain http is for exactly these loopback names; anything that merely looks local is not.
+    func testOnlyLoopbackItselfMayUseHTTP() {
+        for bad in ["http://0.0.0.0/x/meta", "http://localhost.example.invalid/x/meta", "http://mylocalhost/x/meta",
+                    "http://localhost./x/meta", "http://127.0.0.2/x/meta", "http://%6c%6fcalhost/x/meta", "http://[::ffff:127.0.0.1]/x/meta"] {
+            refused(bad)
+        }
+    }
+}
+
+/// The runtime reads `meta` from the URL it was given, with nothing added.
+final class DeliveryURLWiringTests: XCTestCase {
+    func testTheRuntimeRequestsTheConfiguredURL() async throws {
+        let harness = try RuntimeHarness(self)
+        harness.server.publish(try Release.one())
+        let configured = URL(string: "https://cdn.example.invalid/t/42/projects/9/delivery/meta")!
+        let runtime = try harness.make(harness.configuration(deliveryURL: configured))
+        await runtime.start(foreground: true)
+        await runtime.checkNow()
+        XCTAssertEqual(harness.server.metaRequests.first?.url, configured)
+    }
+}
+
+final class TarjimConfigurationTests: XCTestCase {
+    func testTheConfigurationTakesOneDeliveryURL() {
+        let url = URL(string: "https://api.example.invalid/t/7/projects/1/delivery/meta")!
+        let configuration = TarjimConfiguration(deliveryURL: url, apiKey: "k", defaultBundle: .namespace("default"),
+                                                fallbackLanguage: "en")
+        XCTAssertEqual(configuration.deliveryURL, url)
     }
 }
 
