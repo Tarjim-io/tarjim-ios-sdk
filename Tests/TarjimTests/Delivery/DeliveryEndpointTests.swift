@@ -100,7 +100,7 @@ final class DeliveryURLWiringTests: XCTestCase {
         let runtime = try harness.make(harness.configuration(deliveryURL: configured))
         await runtime.start(foreground: true)
         await runtime.checkNow()
-        XCTAssertEqual(harness.server.metaRequests.first?.url, configured)
+        XCTAssertEqual(MetaRequest.withoutQuery(harness.server.metaRequests.first?.url), configured)
     }
 }
 
@@ -114,59 +114,78 @@ final class TarjimConfigurationTests: XCTestCase {
 }
 
 final class ClientIdentityTests: XCTestCase {
-    /// Lower-case token names; `rel/0` and `poll/0` until a release is shown and a `pollAfter` obeyed.
-    func testUserAgentNamesSDKAppOSLanguageReleaseAndPoll() {
-        var identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/0 poll/0")
-        identity.releaseId = 42
-        identity.pollAfter = 1800
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/42 poll/1800")
+    private let full = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar",
+                                      installIdentifier: "8f2c1a", releaseId: 42, appBuild: "77")
+
+    /// The User-Agent names the SDK and nothing else; everything about the app goes in the `meta` query.
+    func testTheUserAgentIsOnlyTheSDK() {
+        XCTAssertEqual(full.userAgent, "Tarjim-iOS/0.1.0")
     }
 
-    func testInstallIdentifierIsSentOnlyWhenSet() {
-        var identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
-        XCTAssertFalse(identity.userAgent.contains("install/"))
-        identity.installIdentifier = "8f2c1a"
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4 lang/ar rel/0 poll/0 install/8f2c1a")
+    /// In this order; `release` is 0 until a release is shown. There is no polling interval to report.
+    func testTheMetaQueryNamesTheAppAndTheRelease() {
+        XCTAssertEqual(full.metaQuery, "appVersion=2.3.1&platform=ios&sdkVersion=0.1.0&release=42"
+                       + "&language=ar&osVersion=17.4&installId=8f2c1a&appBuild=77")
+        let fresh = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "ar", installIdentifier: nil)
+        XCTAssertEqual(fresh.metaQuery, "appVersion=2.3.1&platform=ios&sdkVersion=0.1.0&release=0&language=ar&osVersion=17.4")
     }
 
-    /// Every value is percent-encoded, keeping RFC 3986's unreserved characters, so the line is always
-    /// `token/value` pairs separated by single spaces.
+    /// An app with no usable version sends no `appVersion` at all, and the server serves it as the newest app.
+    func testNoVersionMeansNoAppVersionParameter() {
+        let unversioned = ClientIdentity(sdkVersion: "0.1.0", appVersion: nil, osVersion: "17.4", language: "ar", installIdentifier: nil)
+        XCTAssertEqual(unversioned.metaQuery, "platform=ios&sdkVersion=0.1.0&release=0&language=ar&osVersion=17.4")
+    }
+
+    /// Every value is percent-encoded, keeping RFC 3986's unreserved characters, so no value can add a parameter.
     func testEveryValueIsPercentEncoded() {
-        let identity = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4 beta", language: "zh Hans/TW",
-                                      installIdentifier: "a b")
-        XCTAssertEqual(identity.userAgent, "Tarjim-iOS/0.1.0 app/2.3.1 ios/17.4%20beta lang/zh%20Hans%2FTW rel/0 poll/0 install/a%20b")
+        let odd = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4 beta", language: "zh Hans/TW&x=1+y",
+                                 installIdentifier: "a b", appBuild: "1#2")
+        XCTAssertEqual(odd.metaQuery, "appVersion=2.3.1&platform=ios&sdkVersion=0.1.0&release=0"
+                       + "&language=zh%20Hans%2FTW%26x%3D1%2By&osVersion=17.4%20beta&installId=a%20b&appBuild=1%232")
         let unreserved = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "zh-Hant_TW.~",
                                         installIdentifier: nil)
-        XCTAssertTrue(unreserved.userAgent.contains(" lang/zh-Hant_TW.~ "))
-        let plus = ClientIdentity(sdkVersion: "0.1.0", appVersion: "2.3.1", osVersion: "17.4", language: "a+b", installIdentifier: nil)
-        XCTAssertTrue(plus.userAgent.contains(" lang/a%2Bb "), plus.userAgent)
-        let pairs = identity.userAgent.split(separator: " ", omittingEmptySubsequences: false)
-        XCTAssertTrue(pairs.allSatisfy { $0.split(separator: "/").count == 2 }, identity.userAgent)
+        XCTAssertTrue(unreserved.metaQuery.contains("&language=zh-Hant_TW.~&"))
     }
 }
 
-/// The app's version as `X-Tarjim-App-Version` and `app/` carry it: always `MAJOR.MINOR.PATCH`.
+/// The app's version as the `appVersion` query parameter carries it: `MAJOR.MINOR.PATCH`, or nothing at all.
+/// The same rules as the JavaScript SDK's, so one app version means one release on every platform.
 final class AppVersionTests: XCTestCase {
     func testTheBundleVersionIsReducedToItsCore() {
-        let cases: [(String, String)] = [
+        let cases: [(String, String?)] = [
             ("2.3.1", "2.3.1"), ("2.1 beta", "2.1.0"), ("1.0-rc1", "1.0.0"), ("1.2.3+build.7", "1.2.3"), ("3", "3.0.0"),
-            ("1.02", "1.2.0"), ("007.1.0", "7.1.0"), ("1.2.3.4", "1.2.3"), ("1..2", "1.0.0"), ("1.", "1.0.0"),
-            ("beta", "0.0.0"), ("", "0.0.0"), (" 1.2", "0.0.0"), ("v1.2", "0.0.0"), ("-1.2", "0.0.0"),
-            ("99999999999999999999.1", "0.0.0"), ("1.99999999999999999999", "0.0.0"), ("1.2.3.99999999999999999999", "1.2.3"),
+            ("1.02", "1.2.0"), ("007.1.0", "7.1.0"), ("1.2.3.4", "1.2.3"), ("1.", "1.0.0"), ("0", "0.0.0"),
+            ("2.1.0-rc1", "2.1.0"), ("2.1.0+5", "2.1.0"), ("1.2.x", "1.2.0"), ("1.2.3.", "1.2.3"), ("1.2.3..4", "1.2.3"),
+            ("1.2.3.99999999999999999999", "1.2.3"),
+            // A leading lowercase `v` is a common spelling of a version; anything else before the digits is not one.
+            ("v1.2", "1.2.0"), ("v2.3.1-beta", "2.3.1"),
+            ("V1.2", nil), ("vv1", nil), ("v", nil), (" 1.2", nil), ("-1.2", nil), ("beta", nil), ("", nil), (".", nil), (".5", nil),
+            // An empty part between dots is not a zero.
+            ("1..2", nil), ("1.2..3", nil), ("1..", nil), ("1.2..", nil),
+            ("00", "0.0.0"), ("0.00.000", "0.0.0"),
+            // Nine digits a part at most, counted after leading zeros go.
+            ("123456789.1", "123456789.1.0"), ("1234567890.1", nil), ("1.1234567890", nil), ("0000000001.2", "1.2.0"),
+            ("99999999999999999999.1", nil), ("1.99999999999999999999", nil),
+            // Only ASCII digits are digits.
+            ("\u{0661}.\u{0662}", nil), ("1.\u{0662}", "1.0.0"),
+            // A combining mark ends the digits it follows, as it does in the JavaScript SDK.
+            ("1\u{0301}.2", "1.0.0"), ("1.2\u{0301}", "1.2.0"),
         ]
         for (raw, core) in cases {
             XCTAssertEqual(AppVersion.core(of: raw), core, raw)
         }
     }
 
+    func testNoBundleVersionIsNoVersion() {
+        XCTAssertNil(AppVersion.core(of: nil))
+    }
+
     func testTheCoreAlwaysMatchesTheServersGrammar() {
-        let grammar = try! NSRegularExpression(pattern: #"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"#)
+        let grammar = try! NSRegularExpression(pattern: #"^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$"#)
         for raw in ["", "x", "1", "1.2", "1.2.3", "1.2.3.4.5", "10.20.30-alpha", "0001", "1.0.0.0", String(repeating: "9", count: 40),
-                    "12345678901.12345678901.1234567890"] {
-            let core = AppVersion.core(of: raw)
+                    "12345678901.12345678901.1234567890", "999999999.999999999.999999999", "v0.0.0"] {
+            guard let core = AppVersion.core(of: raw) else { continue }
             XCTAssertNotNil(grammar.firstMatch(in: core, range: NSRange(core.startIndex..., in: core)), "\(raw) → \(core)")
-            XCTAssertLessThanOrEqual(core.count, 32, raw)
         }
     }
 }

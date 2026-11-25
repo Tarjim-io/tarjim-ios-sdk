@@ -9,26 +9,24 @@ struct DeliveryClient: Sendable {
     let apiVersion: String
     /// Asked for at each request; `identity.language` is only the answer when nothing is supplied.
     let language: @Sendable () -> String
-    /// Asked for at each request, like `language`: the release lookups read and the interval the schedule follows.
+    /// Asked for at each request, like `language`: the release lookups read.
     let releaseId: @Sendable () -> Int
-    let pollAfter: @Sendable () -> Int
 
     init(endpoint: DeliveryEndpoint, identity: ClientIdentity, transport: any Transport, apiVersion: String = "2026-07-29",
-         language: (@Sendable () -> String)? = nil, releaseId: (@Sendable () -> Int)? = nil,
-         pollAfter: (@Sendable () -> Int)? = nil) {
+         language: (@Sendable () -> String)? = nil, releaseId: (@Sendable () -> Int)? = nil) {
         self.endpoint = endpoint
         self.identity = identity
         self.language = language ?? { identity.language }
         self.releaseId = releaseId ?? { identity.releaseId }
-        self.pollAfter = pollAfter ?? { identity.pollAfter }
         self.transport = transport
         self.apiVersion = apiVersion
     }
 
     func fetchMeta(ifNoneMatch etag: String?) async -> MetaOutcome {
-        var request = URLRequest(url: endpoint.metaURL)
+        // The delivery URL never has a query of its own (validation refuses one), so the identity is the whole query.
+        guard let url = URL(string: endpoint.metaURL.absoluteString + "?" + currentIdentity().metaQuery) else { return .unreadable }
+        var request = URLRequest(url: url)
         applyIdentity(to: &request, withKey: true)
-        request.setValue(identity.appVersion, forHTTPHeaderField: "X-Tarjim-App-Version")
         if let etag {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
@@ -39,7 +37,10 @@ struct DeliveryClient: Sendable {
         } catch {
             return .networkFailure
         }
-        let retryAfter = Self.retryAfter(response)
+        return Self.metaOutcome(data, response, retryAfter: Self.retryAfter(response))
+    }
+
+    private static func metaOutcome(_ data: Data, _ response: HTTPURLResponse, retryAfter: Int?) -> MetaOutcome {
         switch response.statusCode {
         case 200:
             guard let meta = try? JSONDecoder().decode(Meta.self, from: data) else { return .unreadable }
@@ -53,7 +54,7 @@ struct DeliveryClient: Sendable {
             return .configurationError(code: "redirect", pollAfter: nil)
         case 400, 401, 403, 404:
             let problem = try? JSONDecoder().decode(Problem.self, from: data)
-            if response.statusCode == 404, let code = problem?.code, Self.unreleasedCodes.contains(code) {
+            if response.statusCode == 404, let code = problem?.code, unreleasedCodes.contains(code) {
                 return .unreleased(pollAfter: problem?.pollAfter)
             }
             return .configurationError(code: problem?.code ?? "unknown", pollAfter: problem?.pollAfter)
@@ -122,16 +123,20 @@ struct DeliveryClient: Sendable {
         case networkFailure
     }
 
-    /// The identity travels with the key only: a CDN request carries none of it.
+    /// The identity with what changes over time read now.
+    private func currentIdentity() -> ClientIdentity {
+        var current = identity
+        current.language = language()
+        current.releaseId = releaseId()
+        return current
+    }
+
+    /// The SDK's name travels with the key only: a CDN request carries none of it.
     private func applyIdentity(to request: inout URLRequest, withKey: Bool) {
         guard withKey else { return }
         request.setValue(endpoint.apiKey, forHTTPHeaderField: "X-Tarjim-Apikey")
         request.setValue(apiVersion, forHTTPHeaderField: "X-Tarjim-Api-Version")
-        var current = identity
-        current.language = language()
-        current.releaseId = releaseId()
-        current.pollAfter = pollAfter()
-        request.setValue(current.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(identity.userAgent, forHTTPHeaderField: "User-Agent")
     }
 
     /// `nil` when the reference must not be requested.
@@ -200,3 +205,4 @@ extension DeliveryClient: CustomReflectable {
         Mirror(self, children: ["endpoint": endpoint, "identity": identity, "apiVersion": apiVersion], displayStyle: .struct)
     }
 }
+
